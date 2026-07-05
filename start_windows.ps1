@@ -14,6 +14,27 @@ if (Test-Path $pidFile) {
   Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
 }
 
+function Ensure-Ffmpeg() {
+  if (Get-Command ffmpeg -ErrorAction SilentlyContinue) {
+    Write-Host "ffmpeg already installed."
+    return
+  }
+
+  $winget = Get-Command winget -ErrorAction SilentlyContinue
+  if (-not $winget) {
+    throw "ffmpeg not found, and winget is not available. Install ffmpeg manually, then run again."
+  }
+
+  Write-Host "ffmpeg missing, installing with winget..."
+  & $winget.Source install --id Gyan.FFmpeg -e --accept-package-agreements --accept-source-agreements
+  if ($LASTEXITCODE -ne 0) { throw "ffmpeg install failed" }
+
+  $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
+  if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
+    throw "ffmpeg installed, but is not on PATH yet. Close this window and run start_windows.bat again."
+  }
+}
+
 function Ensure-Requirements($PythonCommand, [string[]]$PythonArgs = @()) {
   $missing = $false
   foreach ($line in Get-Content "requirements.txt") {
@@ -35,6 +56,8 @@ function Ensure-Requirements($PythonCommand, [string[]]$PythonArgs = @()) {
     Write-Host "Dependencies already installed, skipping install."
   }
 }
+
+Ensure-Ffmpeg
 
 $python = Get-Command python -ErrorAction SilentlyContinue
 if ($python) {
