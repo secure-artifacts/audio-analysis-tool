@@ -1,0 +1,2929 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+	  <title>录音分析工具</title>
+  <style>
+    /* ═══════════════════════════════════════
+       30 years of design experience in one CSS
+       ═══════════════════════════════════════ */
+    :root {
+      --bg: #f4f2ee;
+      --card: #ffffff;
+      --card-border: rgba(0,0,0,.06);
+      --text: #1e1e2a;
+      --text-secondary: #6b6b7b;
+      --text-muted: #9292a2;
+      --accent: #4f46e5;
+      --accent-soft: #eef2ff;
+      --accent-hover: #4338ca;
+      --accent-gradient: linear-gradient(135deg, #4f46e5, #7c3aed);
+      --accent-warm: #f59e0b;
+      --bad: #ef4444;
+      --bad-bg: #fef2f2;
+      --good: #10b981;
+      --good-bg: #ecfdf5;
+      --radius-sm: 8px;
+      --radius: 12px;
+      --radius-lg: 16px;
+      --shadow-sm: 0 1px 2px rgba(0,0,0,.04), 0 1px 1px rgba(0,0,0,.02);
+      --shadow: 0 1px 3px rgba(0,0,0,.05), 0 2px 6px rgba(0,0,0,.04);
+      --shadow-lg: 0 4px 16px rgba(0,0,0,.06), 0 2px 8px rgba(0,0,0,.04);
+      --font: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      --font-mono: "SF Mono", "JetBrains Mono", "Cascadia Code", "Consolas", monospace;
+      --transition: .2s cubic-bezier(.4, 0, .2, 1);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111118;
+        --card: #1a1a25;
+        --card-border: rgba(255,255,255,.06);
+        --text: #eeeef0;
+        --text-secondary: #9a9aab;
+        --text-muted: #6a6a7b;
+        --accent-soft: #1e1b4b;
+      }
+    }
+    * { box-sizing: border-box; }
+    ::selection { background: var(--accent); color: #fff; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14.5px/1.65 var(--font);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ═══ Header ═══ */
+    header {
+      background: var(--card);
+      border-bottom: 1px solid var(--card-border);
+      padding: 0 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 56px;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      backdrop-filter: blur(8px);
+      background: rgba(255,255,255,.82);
+    }
+    @media (prefers-color-scheme: dark) {
+      header { background: rgba(26,26,37,.82); }
+    }
+    h1 {
+      font-size: 16px;
+      margin: 0;
+      font-weight: 700;
+      background: var(--accent-gradient);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      letter-spacing: -.2px;
+    }
+    .tabs { display: flex; gap: 3px; background: var(--bg); padding: 3px; border-radius: 10px; }
+    .tab {
+      border: 0;
+      background: transparent;
+      color: var(--text-secondary);
+      padding: 6px 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      transition: all var(--transition);
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active {
+      background: var(--card);
+      color: var(--accent);
+      box-shadow: var(--shadow-sm);
+    }
+
+    /* ═══ Layout ═══ */
+    main {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 32px 28px 48px;
+    }
+    .view { display: none; animation: fadeIn .25s ease; }
+    .view.active { display: block; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* ═══ 转录页单栏布局 ═══ */
+    .transcribe-layout {
+      display: grid;
+      gap: 20px;
+    }
+    .control-card {
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+      box-shadow: var(--shadow);
+      display: grid;
+      gap: 18px;
+    }
+    .control-row {
+      display: flex;
+      gap: 14px;
+      align-items: end;
+      flex-wrap: wrap;
+    }
+    .control-row > * { min-width: 140px; }
+    .control-row .form-group { flex: 1; margin: 0; }
+    .control-row .btn-primary { 
+      flex: 0 0 auto; width: auto; padding: 10px 28px; 
+      white-space: nowrap;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+      box-shadow: var(--shadow);
+      transition: box-shadow var(--transition);
+    }
+    .card:hover { box-shadow: var(--shadow-lg); }
+    .card-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .8px;
+      color: var(--text-muted);
+      margin: 0 0 18px 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .card-title::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: linear-gradient(to right, var(--card-border), transparent);
+    }
+
+    .form-group {
+      display: grid;
+      gap: 5px;
+      margin-bottom: 16px;
+    }
+    .form-group:last-child { margin-bottom: 0; }
+    .form-group > label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary);
+    }
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    /* ═══ Form Controls ═══ */
+    input, select, textarea, button { font: inherit; }
+
+    input[type="text"], select, textarea {
+      width: 100%;
+      border: 1.5px solid var(--card-border);
+      border-radius: var(--radius-sm);
+      padding: 9px 12px;
+      background: var(--card);
+      color: var(--text);
+      transition: all var(--transition);
+    }
+    select {
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b6b7b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+      padding-right: 32px;
+      cursor: pointer;
+    }
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+
+    textarea {
+      min-height: 100px;
+      resize: vertical;
+    }
+    #script { min-height: 200px; line-height: 1.7; }
+    textarea[name="api_keys"] {
+      min-height: 88px;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    textarea[name="api_keys"]:read-only { opacity: .6; cursor: default; }
+
+    /* ═══ File Input ═══ */
+    #audio {
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+    }
+    #audio::file-selector-button {
+      border: 1.5px solid var(--card-border);
+      background: var(--card);
+      padding: 8px 14px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      margin-right: 12px;
+      font-weight: 600;
+      font-size: 13px;
+      transition: all var(--transition);
+    }
+    #audio::file-selector-button:hover {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+    }
+
+    /* ═══ Script Toolbar ═══ */
+    .script-toolbar {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .btn-file {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 7px 13px;
+      border: 1.5px solid var(--card-border);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      background: var(--card);
+      white-space: nowrap;
+      transition: all var(--transition);
+    }
+    .btn-file:hover { border-color: var(--accent); color: var(--accent); }
+    .script-toolbar select { flex: 1; min-width: 70px; padding: 7px 10px; font-size: 13px; }
+    .btn-sm {
+      padding: 7px 11px;
+      border: 1.5px solid var(--card-border);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      background: var(--card);
+      color: var(--bad);
+      white-space: nowrap;
+      transition: all var(--transition);
+    }
+    .btn-sm:hover { border-color: var(--bad); background: var(--bad-bg); }
+
+    /* ═══ Misc Form ═══ */
+    .checkline {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin: 2px 0 14px;
+    }
+    .checkline input[type="checkbox"] {
+      width: 17px;
+      height: 17px;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+    .rubric-list {
+      display: grid;
+      gap: 8px;
+    }
+    .rubric-row {
+      display: grid;
+      grid-template-columns: 24px 1fr 34px;
+      gap: 8px;
+      align-items: start;
+    }
+    .rubric-row > input[type="checkbox"] {
+      margin-top: 10px;
+      accent-color: var(--accent);
+    }
+    .rubric-fields {
+      display: grid;
+      gap: 6px;
+    }
+    .rubric-row textarea {
+      min-height: 42px;
+      line-height: 1.55;
+      font-size: 13px;
+    }
+    .rubric-row .btn-sm {
+      margin-top: 2px;
+      padding: 7px 0;
+      width: 34px;
+      color: var(--text-muted);
+    }
+
+    /* ═══ Primary Button ═══ */
+    .btn-primary {
+      border: 0;
+      background: var(--accent-gradient);
+      color: #fff;
+      border-radius: var(--radius-sm);
+      padding: 11px 20px;
+      font-weight: 700;
+      font-size: 15px;
+      cursor: pointer;
+      width: 100%;
+      transition: all var(--transition);
+      position: relative;
+      overflow: hidden;
+    }
+    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(79,70,229,.3); }
+    .btn-primary:active { transform: translateY(0); }
+    .btn-primary:disabled { opacity: .4; cursor: not-allowed; transform: none; box-shadow: none; }
+    .btn-danger {
+      border: 0;
+      background: var(--bad);
+      color: white;
+      border-radius: var(--radius-sm);
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    /* ═══ Status Card ═══ */
+    .status-card {
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius-lg);
+      padding: 20px 24px;
+      box-shadow: var(--shadow);
+      margin-top: 24px;
+      animation: fadeIn .3s ease;
+    }
+    .status-title {
+      font-weight: 700;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+	    .bar {
+	      height: 6px;
+	      border-radius: 999px;
+	      background: var(--card-border);
+	      overflow: hidden;
+	      margin-top: 12px;
+	    }
+    .fill {
+      height: 100%;
+      width: 0%;
+      background: var(--accent-gradient);
+      border-radius: 999px;
+      transition: width .35s ease;
+    }
+    .status-message {
+      color: var(--text-muted);
+      font-size: 13px;
+      margin-top: 6px;
+    }
+    .error { color: var(--bad); font-weight: 700; }
+    .done { color: var(--good); font-weight: 700; }
+
+    /* ═══ Result Header ═══ */
+    .result-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin: 24px 0 12px;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .result-header strong { font-size: 15px; }
+    .btn-download {
+      border: 1.5px solid var(--card-border);
+      background: var(--card);
+      padding: 8px 16px;
+      border-radius: var(--radius-sm);
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all var(--transition);
+    }
+    .btn-download:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* ═══ Table ═══ */
+    table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      box-shadow: var(--shadow);
+    }
+    th, td {
+      padding: 12px 14px;
+      vertical-align: top;
+      text-align: left;
+      font-size: 13.5px;
+    }
+    th {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      color: var(--text-muted);
+      background: var(--bg);
+      border-bottom: 1px solid var(--card-border);
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    td {
+      border-bottom: 1px solid var(--card-border);
+    }
+    tr:last-child td { border-bottom: 0; }
+    td.time {
+      width: 132px;
+      min-width: 132px;
+      font-variant-numeric: tabular-nums;
+      color: var(--accent);
+      font-weight: 700;
+      font-size: 13px;
+      overflow: visible;
+    }
+    td.time .time-tools {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      justify-content: flex-start;
+      gap: 6px;
+    }
+    td.time .ts-text {
+      position: relative;
+      z-index: 20;
+      margin-left: 0;
+      white-space: nowrap;
+    }
+    th:nth-child(2),
+    td.speaker {
+      width: 120px;
+      min-width: 120px;
+    }
+    td.speaker { font-size: 12px; color: var(--text-muted); }
+    td.speaker select {
+      min-width: 96px;
+      padding: 7px 26px 7px 10px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    td.fr, td.zh { width: 38%; }
+    .celltext {
+      white-space: pre-wrap;
+      min-height: 30px;
+      outline: none;
+      padding: 4px 6px;
+      margin: -4px -6px;
+      border-radius: 4px;
+      transition: background var(--transition);
+    }
+    .celltext:focus {
+      background: var(--accent-soft);
+      box-shadow: inset 0 0 0 1.5px var(--accent);
+    }
+
+    /* ═══ 范围滑杆 ═══ */
+	    .range-track {
+	      position:absolute;top:10px;left:0;right:0;height:6px;
+	      border-radius:999px;background:var(--card-border);z-index:1;
+	    }
+    .range-track::after {
+      content:'';position:absolute;top:0;bottom:0;
+      left:var(--track-left,0%);right:var(--track-right,0%);
+      background:var(--accent-gradient);border-radius:999px;
+    }
+    #rangeStartSlider, #rangeEndSlider {
+      -webkit-appearance:none;appearance:none;
+      height:0;margin:0;outline:none;
+    }
+    #rangeStartSlider::-webkit-slider-thumb, #rangeEndSlider::-webkit-slider-thumb {
+      -webkit-appearance:none;appearance:none;
+      width:18px;height:18px;border-radius:50%;
+      background:var(--card);border:2px solid var(--accent);
+      cursor:pointer;pointer-events:auto;
+      box-shadow:0 1px 4px rgba(0,0,0,.15);
+      transition:transform .15s;
+    }
+    #rangeStartSlider::-webkit-slider-thumb:hover, #rangeEndSlider::-webkit-slider-thumb:hover {
+      transform:scale(1.15);
+    }
+    #rangeStartSlider::-moz-range-thumb, #rangeEndSlider::-moz-range-thumb {
+      width:18px;height:18px;border-radius:50%;
+      background:var(--card);border:2px solid var(--accent);
+      cursor:pointer;pointer-events:auto;
+      box-shadow:0 1px 4px rgba(0,0,0,.15);
+    }
+    #rangeStartSlider { z-index:3; }
+    #rangeEndSlider { z-index:2; }
+    /* 保证拖拽时拇指在最上面 */
+    #rangeStartSlider.dragging { z-index:4; }
+    #rangeEndSlider.dragging { z-index:4; }
+
+	    /* ═══ 评价面板 ═══ */
+    .review {
+      white-space: pre-wrap;
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius-lg);
+      padding: 22px;
+      min-height: 280px;
+      font: inherit;
+      line-height: 1.8;
+      box-shadow: var(--shadow);
+    }
+    .review-time-link {
+      border: 0;
+      background: var(--accent-soft);
+      color: var(--accent);
+      border-radius: 4px;
+      padding: 1px 5px;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .review-report {
+      display: grid;
+      gap: 14px;
+      white-space: normal;
+      line-height: 1.6;
+    }
+    .review-tabs {
+      display: inline-flex;
+      gap: 4px;
+      background: var(--bg);
+      border-radius: 8px;
+      padding: 3px;
+      width: fit-content;
+    }
+    .review-tab {
+      border: 0;
+      background: transparent;
+      color: var(--text-secondary);
+      border-radius: 6px;
+      padding: 5px 12px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+	    .review-tab.active {
+	      background: var(--card);
+	      color: var(--accent);
+	      box-shadow: 0 0 0 1px var(--accent);
+	    }
+    #reviewResultHeader[data-mode="summary"] .table-tools { display: none; }
+    .review-section {
+      border-bottom: 1px solid var(--card-border);
+      padding-bottom: 14px;
+    }
+    .review-section:last-child { border-bottom: 0; padding-bottom: 0; }
+    .review-section h3 {
+      margin: 0 0 8px;
+      font-size: 14px;
+      color: var(--text);
+    }
+    .review-section p { margin: 0; color: var(--text-secondary); }
+    .review-list {
+      display: grid;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .review-item {
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius-sm);
+      padding: 10px;
+      background: var(--bg);
+    }
+    .review-item-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+    }
+    .review-item-detail,
+    .review-item-suggestion {
+      margin-top: 5px;
+      color: var(--text-secondary);
+      font-size: 13px;
+      line-height: 1.65;
+    }
+    .review-item-suggestion { color: var(--accent-hover); }
+    .review-summary {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .review-summary[hidden] { display: none; }
+    .summary-card {
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      padding: 12px 14px;
+      box-shadow: var(--shadow-sm);
+    }
+    .summary-card .label {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-weight: 700;
+      letter-spacing: .5px;
+      text-transform: uppercase;
+    }
+    .summary-card .value {
+      margin-top: 4px;
+      font-size: 22px;
+      font-weight: 800;
+      color: var(--text);
+      font-variant-numeric: tabular-nums;
+    }
+    .empty {
+      color: var(--text-muted);
+      padding: 24px 0;
+      text-align: center;
+    }
+
+	    /* ═══ Responsive ═══ */
+
+    /* ═══ 空白状态 ═══ */
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 80px 20px;
+      color: var(--text-muted);
+      text-align: center;
+      border: 2px dashed var(--card-border);
+      border-radius: var(--radius-lg);
+      background: var(--card);
+    }
+    .empty-state[hidden] { display: none; }
+    .empty-icon { font-size: 56px; margin-bottom: 16px; opacity: .4; }
+    .empty-state div:last-child { font-size: 15px; }
+
+    /* ═══ 历史记录 ═══ */
+    .history-section {
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+	    .history-header {
+	      display: flex;
+	      align-items: center;
+	      gap: 8px;
+	      font-size: 11px;
+	      font-weight: 700;
+	      text-transform: uppercase;
+	      letter-spacing: .6px;
+	      color: var(--text-muted);
+	      padding: 10px 14px;
+	      border-bottom: 1px solid var(--card-border);
+	    }
+    .history-list {
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    .history-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 14px;
+      cursor: pointer;
+      transition: background .15s;
+      font-size: 12px;
+      border-bottom: 1px solid var(--card-border);
+    }
+    .history-item:last-child { border-bottom: 0; }
+    .history-item:hover { background: var(--bg); }
+    .history-item .h-status {
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-weight: 700;
+    }
+    .history-item .h-status.done { background: #ecfdf5; color: var(--good); }
+    .history-item .h-status.error { background: #fef2f2; color: var(--bad); }
+    .history-item .h-status.running { background: var(--accent-soft); color: var(--accent); }
+    .history-item .h-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .history-item .h-time { color: var(--text-muted); font-size: 11px; white-space: nowrap; }
+    .hist-edit,
+    .hist-del {
+      border:0;background:none;cursor:pointer;font-size:12px;color:var(--text-muted);
+      padding:2px 4px;border-radius:4px;line-height:1;flex-shrink:0;
+      transition:color .15s,background .15s;
+    }
+    .hist-edit:hover { color:var(--accent); background:var(--accent-soft); }
+    .hist-del:hover { color:var(--bad); background:var(--bad-bg,#fef2f2); }
+
+    /* ═══ 标注：颜色指示条 + 悬停工具栏 + 浮动备注 ═══ */
+    td.time { position:relative; }
+    /* 颜色指示：整行淡色背景 + 左侧粗条 */
+    tr.anno-green { background:#f0fdf4; }
+    tr.anno-green td.time { box-shadow:inset 4px 0 0 var(--good); }
+    tr.anno-red { background:#fef2f2; }
+    tr.anno-red td.time { box-shadow:inset 4px 0 0 var(--bad); }
+    @media (prefers-color-scheme: dark) {
+      tr.anno-green { background:#0a1f0f; }
+      tr.anno-red { background:#1f0a0a; }
+    }
+
+    /* 备注指示：时间旁只留一个图标，正文放进弹窗 */
+    .note-indicator {
+      display:none; align-items:center; justify-content:center;
+      margin-left:6px; border:0; background:transparent; color:var(--accent);
+      font-size:12px; line-height:1; padding:1px 2px; border-radius:4px;
+      vertical-align:middle; cursor:pointer; position:relative; z-index:20;
+    }
+    .note-indicator:hover { background:var(--accent-soft); }
+
+    /* 标注工具栏：固定在时间点下方 */
+    .anno-toolbar {
+      display:flex;
+      background:var(--card); border:1px solid var(--card-border);
+      border-radius:8px; padding:3px 5px; gap:3px; align-items:center;
+      box-shadow:none; z-index:10; white-space:nowrap;
+    }
+    .anno-toolbar button {
+      border:0; background:none; cursor:pointer; font-size:14px; line-height:1;
+      padding:2px; border-radius:4px; transition:background .15s;
+    }
+    .anno-toolbar button:hover { background:var(--bg); }
+    .anno-toolbar .at-dot {
+      width:14px;height:14px;border-radius:50%;border:2px solid var(--card-border);
+      cursor:pointer;transition:transform .15s;padding:0;flex-shrink:0;
+    }
+    .anno-toolbar .at-dot:hover { transform:scale(1.2); }
+    .anno-toolbar .at-dot.on { border-color:var(--text); box-shadow:0 0 0 2px var(--accent-soft); }
+    .anno-toolbar .at-dot.g { background:var(--good); }
+    .anno-toolbar .at-dot.r { background:var(--bad); }
+    .anno-toolbar .at-dot.w { background:#d1d5db; }
+    .anno-toolbar .at-note { color:var(--text-muted); }
+    .anno-toolbar .at-note.has { color:var(--accent); }
+    .anno-toolbar .at-note:hover { color:var(--accent); }
+
+    /* 浮动备注卡片 */
+    .anno-popup {
+      display:none; position:fixed; z-index:100;
+      background:var(--card); border:1px solid var(--card-border);
+      border-radius:var(--radius); padding:12px;
+      box-shadow:0 8px 30px rgba(0,0,0,.12); width:320px;
+    }
+    .anno-popup.show { display:block; }
+    .anno-popup textarea {
+      width:100%; border:1px solid var(--card-border); border-radius:6px;
+      padding:8px; font-size:13px; resize:vertical; min-height:60px;
+      background:var(--bg); color:var(--text);
+    }
+    .anno-popup textarea:focus { outline:none; border-color:var(--accent); }
+    .anno-popup .popup-header {
+      display:flex; justify-content:space-between; align-items:center;
+      margin-bottom:8px; font-size:12px; font-weight:600; color:var(--text-muted);
+    }
+    .anno-popup .popup-close {
+      border:0; background:none; cursor:pointer; font-size:16px; color:var(--text-muted); padding:0;
+    }
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 200;
+      display: grid;
+      place-items: center;
+      background: rgba(17, 24, 39, .45);
+      padding: 20px;
+    }
+    .modal-backdrop[hidden] { display: none; }
+    .app-modal {
+      width: min(440px, 100%);
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius-lg);
+      box-shadow: 0 18px 60px rgba(0,0,0,.22);
+      padding: 22px;
+      display: grid;
+      gap: 14px;
+    }
+    .app-modal h3 { margin: 0; font-size: 17px; }
+    .app-modal p { margin: 0; color: var(--text-secondary); line-height: 1.6; white-space: pre-wrap; }
+    .modal-fields { display: grid; gap: 10px; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+    .modal-actions button { width: auto; padding: 8px 16px; }
+
+    /* ═══ 评价/历史页布局 ═══ */
+    .review-layout {
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      gap: 24px;
+      align-items: start;
+    }
+    .review-layout .history-section { position: sticky; top: 76px; }
+    #reviewContent {
+      display: grid;
+      gap: 16px;
+      align-content: start;
+    }
+    .review-layout .empty {
+      color: var(--text-muted);
+      padding: 60px 20px;
+      text-align: center;
+      border: 2px dashed var(--card-border);
+      border-radius: var(--radius-lg);
+    }
+    .annotation-panel {
+      position: fixed;
+      width: 300px;
+      margin-top: 0;
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow);
+      padding: 14px;
+      display: grid;
+      gap: 10px;
+      z-index: 35;
+    }
+    .annotation-panel[hidden] { display: none; }
+    .annotation-note-card {
+      position: fixed;
+      width: 300px;
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 10px 12px;
+      z-index: 34;
+      cursor: pointer;
+    }
+    .annotation-note-card .annotation-time { font-size: 12px; }
+    .annotation-note-card p {
+      margin: 6px 0 0;
+      color: var(--text-secondary);
+      font-size: 12px;
+      line-height: 1.45;
+      max-height: 74px;
+      overflow: hidden;
+    }
+    .annotation-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-secondary);
+    }
+    .annotation-meta {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .annotation-time {
+      color: var(--accent);
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+    }
+    .annotation-kind {
+      border-radius: 999px;
+      padding: 2px 8px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-weight: 700;
+    }
+    .annotation-panel textarea {
+      min-height: 120px;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    .annotation-panel select {
+      font-size: 13px;
+      padding: 7px 10px;
+    }
+    tr.selected-annotation { outline: 2px solid var(--accent); outline-offset: -2px; }
+    .annotation-link {
+      position: fixed;
+      height: 2px;
+      background: var(--accent);
+      transform-origin: left center;
+      z-index: 30;
+      pointer-events: none;
+      opacity: .8;
+    }
+    .annotation-link::before,
+    .annotation-link::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--accent);
+      transform: translateY(-50%);
+    }
+    .annotation-link::before { left: -4px; }
+    .annotation-link::after { right: -4px; }
+    .annotation-link.pinned {
+      z-index: 33;
+      opacity: .55;
+    }
+    .review-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .toolbar-group {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding-right: 10px;
+      border-right: 1px solid var(--card-border);
+    }
+    .toolbar-group:last-child { border-right: 0; padding-right: 0; }
+    .review-criterion-select {
+      width: auto;
+      min-width: 160px;
+      max-width: 260px;
+      padding: 5px 28px 5px 10px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .review-filters {
+      display: flex;
+      gap: 4px;
+      background: var(--bg);
+      border-radius: 8px;
+      padding: 3px;
+    }
+    .review-filter {
+      border: 0;
+      background: transparent;
+      color: var(--text-secondary);
+      border-radius: 6px;
+      padding: 5px 9px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+	    .review-filter.active {
+	      background: var(--card);
+	      color: var(--accent);
+	      box-shadow: 0 0 0 1px var(--accent);
+	    }
+    @media (max-width: 820px) {
+      .review-layout { grid-template-columns: 1fr; }
+      .review-layout .history-section { position: static; }
+      .review-summary { grid-template-columns: 1fr; }
+      .annotation-panel { position: static; width: auto; margin-top: 14px; }
+      .annotation-link,
+      .annotation-note-card { display: none; }
+    }
+
+    /* ═══ 结果表格容器 ═══ */
+    .result-table-wrap {
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      box-shadow: var(--shadow);
+    }
+    .result-table-wrap table { border: 0; box-shadow: none; }
+    .view-toggle {
+      display: flex;
+      gap: 4px;
+      background: var(--bg);
+      border-radius: 8px;
+      padding: 3px;
+    }
+    .view-toggle button {
+      border: 0;
+      background: transparent;
+      color: var(--text-secondary);
+      border-radius: 6px;
+      padding: 5px 9px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+	    .view-toggle button.active {
+	      background: var(--card);
+	      color: var(--accent);
+	      box-shadow: 0 0 0 1px var(--accent);
+	    }
+    .result-table-wrap.view-fr .zh,
+    .result-table-wrap.view-fr .zh-col,
+    .result-table-wrap.view-zh .fr,
+    .result-table-wrap.view-zh .fr-col { display: none; }
+    .result-table-wrap.view-fr .fr,
+    .result-table-wrap.view-zh .zh { width: auto; }
+    .audio-player {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      padding: 10px 12px;
+      box-shadow: var(--shadow-sm);
+    }
+    .audio-player[hidden] { display: none; }
+    .audio-player audio { width: 100%; min-width: 240px; }
+	    .ts-text, .review-time-link { cursor: pointer; }
+	    /* 当前播放行高亮 */
+	    tr.current-playing { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--accent-soft); }
+	    tr.current-playing td.time { box-shadow: inset 4px 0 0 var(--accent); }
+    .save-status {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+    .save-status.saving { color: var(--accent); }
+    .save-status.saved { color: var(--good); }
+    .save-status.error { color: var(--bad); }
+
+    /* ═══ 响应式 ═══ */
+	    @media (max-width: 820px) {
+	      .control-row { flex-direction: column; align-items: stretch; }
+	      .control-row .btn-primary { width: 100%; }
+	      header { padding: 0 16px; }
+	      main { padding: 20px 16px 40px; }
+      table, thead, tbody, tr, th, td { display: block; }
+      thead { display: none; }
+      tr { border-bottom: 1px solid var(--card-border); }
+      td { border-bottom: 0; width: 100% !important; padding: 8px 12px; }
+      td::before {
+        content: attr(data-label);
+        display: block;
+        color: var(--text-muted);
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .5px;
+        margin-bottom: 4px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>录音分析工具</h1>
+    <div style="display:flex;align-items:center;gap:8px">
+      <span id="saveStatus" class="save-status" hidden></span>
+      <nav class="tabs" aria-label="页面">
+        <button class="tab active" data-tab="transcribe">转录</button>
+        <button class="tab" data-tab="settings">设置</button>
+        <button class="tab" data-tab="review">历史 / 评价</button>
+      </nav>
+    </div>
+  </header>
+
+	  <main>
+	    <div id="transcribe" class="view active">
+	      <div class="transcribe-layout">
+	        <form id="jobForm" class="control-card">
+	          <div class="form-group" style="margin:0">
+	            <label style="font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px">音频文件</label>
+	            <input id="audio" name="audio" type="file" accept="audio/*,video/*" required>
+	          </div>
+
+	          <div class="form-group" id="rangeGroup" style="display:none;margin:0">
+	            <label style="font-size:12px;font-weight:600">转录范围</label>
+	            <div id="rangeLabels" style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums">
+	              <span id="rangeStartLabel">00:00</span>
+	              <span id="rangeDurationLabel">00:00</span>
+	              <span id="rangeEndLabel">00:00</span>
+	            </div>
+	            <div style="position:relative;height:28px">
+	              <input type="range" id="rangeStartSlider" min="0" max="100" value="0" step="1" style="position:absolute;width:100%;height:0;top:10px;pointer-events:none;appearance:none;background:transparent;z-index:2">
+	              <input type="range" id="rangeEndSlider" min="0" max="100" value="100" step="1" style="position:absolute;width:100%;height:0;top:10px;pointer-events:none;appearance:none;background:transparent;z-index:3">
+	              <div class="range-track"></div>
+	            </div>
+	            <input type="hidden" name="range_start" id="rangeStartInput" value="0">
+	            <input type="hidden" name="range_end" id="rangeEndInput" value="">
+	          </div>
+
+	          <div class="control-row">
+	            <div class="form-group" style="flex:2">
+	              <label style="font-size:12px;font-weight:600">参考稿</label>
+	              <div class="script-toolbar" style="margin:0">
+	                <label class="btn-file" style="font-size:12px;padding:5px 10px">
+	                  上传
+	                  <input type="file" id="manuscriptFile" accept=".txt,.md" style="display:none">
+	                </label>
+	                <select id="manuscriptSelect" style="font-size:12px;padding:5px 8px">
+	                  <option value="">已保存文稿</option>
+	                </select>
+                <button type="button" id="manuscriptDeleteBtn" class="btn-sm" style="font-size:12px;padding:5px 8px" hidden>✕</button>
+              </div>
+              <textarea id="script" name="script" style="display:none"></textarea>
+	            </div>
+	            <div class="form-group" style="flex:0 0 auto">
+	              <label style="font-size:12px;font-weight:600">&nbsp;</label>
+	              <label class="checkline" style="font-size:12px;margin:0;white-space:nowrap">
+	                <input name="make_review" type="checkbox" checked> 生成评价
+	              </label>
+	            </div>
+	            <button id="startBtn" class="btn-primary" type="submit">开始转录</button>
+	          </div>
+	        </form>
+
+	        <div id="status" class="status-card" hidden>
+	          <div id="statusTitle" class="status-title">等待中</div>
+	          <div class="bar"><div id="progressFill" class="fill"></div></div>
+	          <div id="statusMessage" class="status-message"></div>
+	          <div style="display:flex;gap:8px;margin-top:8px">
+	            <button type="button" id="pauseBtn" class="btn-sm" hidden>暂停</button>
+	            <button type="button" id="resumeBtn" class="btn-sm" hidden style="color:var(--good);border-color:var(--good)">继续</button>
+	          </div>
+	        </div>
+
+	        <div id="resultArea" hidden>
+	          <div id="playerBar" class="audio-player" hidden>
+	            <strong>播放</strong>
+	            <audio id="audioPlayer" controls preload="metadata"></audio>
+	          </div>
+	          <div class="result-header">
+	            <strong id="resultTitle">法中对照</strong>
+	            <div class="review-actions">
+	              <div class="view-toggle" data-target="resultTableWrap">
+	                <button class="active" data-view="both" type="button">双栏</button>
+	                <button data-view="zh" type="button">中文</button>
+	                <button data-view="fr" type="button">法语</button>
+	              </div>
+	              <a id="downloadLink" class="btn-download" href="#">下载 .md</a>
+	            </div>
+	          </div>
+	          <div class="result-table-wrap view-both" id="resultTableWrap">
+	            <table id="resultTable">
+	              <thead>
+	                <tr><th>时间</th><th>说话人</th><th class="fr-col">法语</th><th class="zh-col">中文</th></tr>
+	              </thead>
+	              <tbody id="resultBody"></tbody>
+	            </table>
+	          </div>
+	        </div>
+
+		        <div id="emptyState" class="empty-state">
+		          <div class="empty-icon">录音</div>
+		          <div style="font-size:15px">选择音频文件，点击开始转录</div>
+		        </div>
+
+		        <div class="history-section" style="margin-top:24px">
+		          <div class="history-header">
+		            <span>转录记录</span>
+                <button type="button" id="clearHistoryBtn" class="hist-del" title="清空所有历史记录">清空</button>
+		            <input type="text" id="historySearch" placeholder="搜索文件名…" style="border:0;background:var(--bg);border-radius:4px;padding:4px 8px;font-size:11px;font-weight:400;text-transform:none;letter-spacing:0;width:140px;margin-left:auto" title="按文件名筛选">
+		          </div>
+		          <div id="historyList" class="history-list" style="max-height:200px"></div>
+		        </div>
+		      </div>
+		    </div>
+
+    <div id="settings" class="view">
+      <div style="display:flex;justify-content:center;padding:20px 0">
+        <div style="max-width:760px;width:100%;display:grid;gap:16px">
+        <div class="card">
+          <h2 class="card-title">模型与 API</h2>
+          <div class="form-group">
+            <label>转录模型</label>
+            <select name="whisper_model" form="jobForm">
+              <option value="whisper-large-v3-turbo">whisper-large-v3-turbo</option>
+              <option value="whisper-large-v3">whisper-large-v3</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>整理 / 翻译模型</label>
+            <select name="chat_model" form="jobForm">
+              <option value="meta-llama/llama-4-scout-17b-16e-instruct">Llama 4 Scout 17B 16E</option>
+              <option value="llama-3.3-70b-versatile">Llama 3.3 70B</option>
+              <option value="gemma2-9b-it">Gemma 2 9B</option>
+              <option value="qwen/qwen3-32b">Qwen 3 32B</option>
+              <option value="openai/gpt-oss-20b">GPT OSS 20B</option>
+              <option value="openai/gpt-oss-120b">GPT OSS 120B</option>
+              <option value="openai/gpt-oss-safeguard-20b">Safety GPT OSS 20B</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>录音语言</label>
+            <select name="language" form="jobForm">
+              <option value="fr">🇫🇷 法语（Français）</option>
+              <option value="en">🇬🇧 英语（English）</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <div style="display:flex;align-items:center;gap:8px">
+              <label style="flex:1;margin:0">Groq API Keys（每行一个）</label>
+              <button type="button" id="toggleKeysBtn" style="border:none;background:none;cursor:pointer;font-size:12px;padding:2px 4px;color:var(--text-muted)" title="显示/隐藏完整 Key">显示</button>
+            </div>
+            <textarea id="keysTextarea" name="api_keys" form="jobForm" placeholder="gsk_..." required style="min-height:88px"></textarea>
+          </div>
+        </div>
+        <div class="card">
+          <h2 class="card-title">评价标准</h2>
+          <input id="rubricInput" name="rubric_json" form="jobForm" type="hidden">
+          <div id="rubricList" class="rubric-list"></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+            <button type="button" id="addRubricBtn" class="btn-sm" style="color:var(--accent);border-color:var(--accent)">添加标准</button>
+            <button type="button" id="importRubricBtn" class="btn-sm">导入标准</button>
+            <button type="button" id="exportRubricBtn" class="btn-sm">导出标准</button>
+            <input type="file" id="importRubricFile" accept=".json,application/json" hidden>
+          </div>
+        </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="review" class="view">
+      <div class="review-layout">
+	        <div class="history-section">
+	          <div class="history-header">
+	            <span>历史记录</span>
+	            <button type="button" id="clearReviewHistoryBtn" class="hist-del" title="清空所有历史记录">清空</button>
+	            <input type="text" id="reviewHistorySearch" placeholder="搜索文件名…" style="border:0;background:var(--bg);border-radius:4px;padding:4px 8px;font-size:11px;font-weight:400;text-transform:none;letter-spacing:0;width:130px;margin-left:auto" title="按文件名筛选">
+	          </div>
+	          <div id="reviewHistoryList" class="history-list" style="max-height:none"></div>
+          <div id="annotationPanel" class="annotation-panel" hidden>
+            <div class="annotation-title">当前标注</div>
+            <div class="annotation-meta">
+              <span id="annotationTime" class="annotation-time">--:--:--</span>
+              <span id="annotationKind" class="annotation-kind">普通</span>
+            </div>
+            <textarea id="annotationNote" placeholder="在这里写这一处的观察、问题或改进建议..."></textarea>
+          </div>
+        </div>
+        <div id="reviewContent">
+          <div id="reviewEmpty" class="empty">选择左侧一条记录查看录音评价</div>
+          <div id="reviewSummary" class="review-summary" hidden>
+            <div class="summary-card"><div class="label">问题</div><div id="summaryIssues" class="value">0</div></div>
+            <div class="summary-card"><div class="label">亮点</div><div id="summaryHighlights" class="value">0</div></div>
+            <div class="summary-card"><div class="label">备注</div><div id="summaryNotes" class="value">0</div></div>
+          </div>
+          <div id="reviewPlayerBar" class="audio-player" hidden>
+            <strong>播放</strong>
+            <audio id="reviewAudioPlayer" controls preload="metadata"></audio>
+          </div>
+          <div class="result-header" id="reviewResultHeader" hidden>
+            <strong>查看</strong>
+            <div class="review-actions">
+              <div class="toolbar-group">
+                <div id="reviewModeTabs" class="review-tabs" hidden>
+                  <button class="review-tab active" data-review-mode="summary" type="button">总评</button>
+                  <button class="review-tab" data-review-mode="transcript" type="button">法中对照</button>
+                </div>
+              </div>
+              <div class="toolbar-group">
+                <select id="reviewCriterionSelect" class="review-criterion-select" title="评价总结">
+                  <option value="">评价总结：全部标准</option>
+                </select>
+              </div>
+              <div class="toolbar-group table-tools">
+                <div class="review-filters" id="reviewFilters">
+                  <button class="review-filter active" data-filter="all" type="button">全部</button>
+                  <button class="review-filter" data-filter="red" type="button">问题</button>
+                  <button class="review-filter" data-filter="green" type="button">亮点</button>
+                  <button class="review-filter" data-filter="note" type="button">备注</button>
+                </div>
+                <div class="view-toggle" data-target="reviewTableWrap">
+                  <button class="active" data-view="both" type="button">双栏</button>
+                  <button data-view="zh" type="button">中文</button>
+                  <button data-view="fr" type="button">法语</button>
+                </div>
+              </div>
+              <div class="toolbar-group">
+                <a id="reviewDownloadLink" class="btn-download" href="#">下载 .md</a>
+              </div>
+            </div>
+          </div>
+          <div id="reviewText" class="review" hidden></div>
+          <div id="reviewTranscriptPane" hidden>
+            <div class="result-table-wrap view-both" id="reviewTableWrap" hidden>
+              <table>
+                <thead><tr><th>时间</th><th>说话人</th><th class="fr-col">法语</th><th class="zh-col">中文</th></tr></thead>
+                <tbody id="reviewResultBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <div id="modalBackdrop" class="modal-backdrop" hidden></div>
+  <div id="annotationLink" class="annotation-link" hidden></div>
+  <div id="annotationNoteLayer"></div>
+
+  <script>
+    const tabs = document.querySelectorAll(".tab");
+    const views = document.querySelectorAll(".view");
+    const form = document.getElementById("jobForm");
+    const startBtn = document.getElementById("startBtn");
+    const statusBox = document.getElementById("status");
+    const statusTitle = document.getElementById("statusTitle");
+    const statusMessage = document.getElementById("statusMessage");
+    const modalBackdrop = document.getElementById("modalBackdrop");
+	    const progressFill = document.getElementById("progressFill");
+	    const resultTable = document.getElementById("resultTable");
+    const resultBody = document.getElementById("resultBody");
+    const resultArea = document.getElementById("resultArea");
+    const resultTableWrap = document.getElementById("resultTableWrap");
+    const resultTitle = document.getElementById("resultTitle");
+    const playerBar = document.getElementById("playerBar");
+    const audioPlayer = document.getElementById("audioPlayer");
+    const downloadLink = document.getElementById("downloadLink");
+    const reviewText = document.getElementById("reviewText");
+    const reviewEmpty = document.getElementById("reviewEmpty");
+    const pauseBtn = document.getElementById("pauseBtn");
+    const resumeBtn = document.getElementById("resumeBtn");
+    const emptyState = document.getElementById("emptyState");
+    const historyList = document.getElementById("historyList");
+    const reviewHistoryList = document.getElementById("reviewHistoryList");
+    const clearHistoryBtn = document.getElementById("clearHistoryBtn");
+    const clearReviewHistoryBtn = document.getElementById("clearReviewHistoryBtn");
+    const reviewResultBody = document.getElementById("reviewResultBody");
+    const reviewResultHeader = document.getElementById("reviewResultHeader");
+    const reviewTableWrap = document.getElementById("reviewTableWrap");
+    const reviewModeTabs = document.getElementById("reviewModeTabs");
+    const reviewTranscriptPane = document.getElementById("reviewTranscriptPane");
+    const reviewDownloadLink = document.getElementById("reviewDownloadLink");
+    const reviewPlayerBar = document.getElementById("reviewPlayerBar");
+    const reviewAudioPlayer = document.getElementById("reviewAudioPlayer");
+    const annotationPanel = document.getElementById("annotationPanel");
+    const annotationLink = document.getElementById("annotationLink");
+    const annotationNoteLayer = document.getElementById("annotationNoteLayer");
+    const annotationTime = document.getElementById("annotationTime");
+    const annotationKind = document.getElementById("annotationKind");
+    const annotationNote = document.getElementById("annotationNote");
+    const reviewSummary = document.getElementById("reviewSummary");
+    const summaryIssues = document.getElementById("summaryIssues");
+    const summaryHighlights = document.getElementById("summaryHighlights");
+    const summaryNotes = document.getElementById("summaryNotes");
+    const reviewFilters = document.getElementById("reviewFilters");
+    const reviewCriterionSelect = document.getElementById("reviewCriterionSelect");
+    const saveStatus = document.getElementById("saveStatus");
+    let pollTimer = null;
+    let currentJobId = null;
+    let renderedParagraphs = 0;  // 已渲染的段落数
+    let selectedAnnotation = null;
+    let currentReviewFilter = "all";
+    let currentReviewResult = null;
+    let currentReviewJobId = null;
+    let pendingSaves = 0;
+    let saveStatusTimer = null;
+    const RUBRIC_KEY = "audio_review_rubric_v3";
+    const JOB_META_KEY = "sermon_job_meta";
+    const rubricList = document.getElementById("rubricList");
+    const rubricInput = document.getElementById("rubricInput");
+    const addRubricBtn = document.getElementById("addRubricBtn");
+    const importRubricBtn = document.getElementById("importRubricBtn");
+    const exportRubricBtn = document.getElementById("exportRubricBtn");
+    const importRubricFile = document.getElementById("importRubricFile");
+    let rubric = loadRubric();
+
+    function sourceLabels(result = {}) {
+      const isEnglish = result.language === "en";
+      return {
+        pair: isEnglish ? "英中对照" : "法中对照",
+        source: isEnglish ? "英语" : "法语",
+      };
+    }
+
+    function applyLanguageLabels(result = {}, root = document) {
+      const labels = sourceLabels(result);
+      if (root === document && resultTitle) resultTitle.textContent = labels.pair;
+      if (root === document) {
+        const tab = reviewModeTabs?.querySelector('[data-review-mode="transcript"]');
+        if (tab) tab.textContent = labels.pair;
+      }
+      root.querySelectorAll('[data-view="fr"]').forEach(btn => { btn.textContent = labels.source; });
+      root.querySelectorAll(".fr-col").forEach(th => { th.textContent = labels.source; });
+      root.querySelectorAll("td.fr").forEach(td => { td.dataset.label = labels.source; });
+    }
+
+    function closeModal(value) {
+      modalBackdrop.hidden = true;
+      modalBackdrop.textContent = "";
+      modalBackdrop._resolve?.(value);
+      modalBackdrop._resolve = null;
+    }
+
+    function showModal({ title, message = "", fields = [], danger = false }) {
+      return new Promise(resolve => {
+        modalBackdrop._resolve = resolve;
+        modalBackdrop.innerHTML = `
+          <form class="app-modal">
+            <h3>${escapeHtml(title)}</h3>
+            ${message ? `<p>${escapeHtml(message)}</p>` : ""}
+            <div class="modal-fields">
+              ${fields.map((field, i) => field.type === "textarea"
+                ? `<textarea data-i="${i}" rows="4" placeholder="${escapeHtml(field.placeholder || "")}">${escapeHtml(field.value || "")}</textarea>`
+                : `<input type="text" data-i="${i}" placeholder="${escapeHtml(field.placeholder || "")}" value="${escapeHtml(field.value || "")}">`
+              ).join("")}
+            </div>
+            <div class="modal-actions">
+              <button class="btn-sm" type="button" data-cancel>取消</button>
+              <button class="${danger ? "btn-danger" : "btn-primary"}" type="submit">确定</button>
+            </div>
+          </form>`;
+        modalBackdrop.hidden = false;
+        modalBackdrop.querySelector("input,textarea,button")?.focus();
+        modalBackdrop.querySelector("[data-cancel]").addEventListener("click", () => closeModal(null));
+        modalBackdrop.querySelector("form").addEventListener("submit", e => {
+          e.preventDefault();
+          closeModal(fields.map((_, i) => modalBackdrop.querySelector(`[data-i="${i}"]`)?.value || ""));
+        });
+      });
+    }
+
+    async function showAlert(message, title = "提示") {
+      await showModal({ title, message });
+    }
+
+    async function showConfirm(message, title = "确认") {
+      return (await showModal({ title, message, danger: true })) !== null;
+    }
+
+    tabs.forEach((tab) => {
+      tab.addEventListener("click", () => switchTab(tab.dataset.tab));
+    });
+
+    function switchTab(name) {
+      tabs.forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === name));
+      views.forEach((view) => view.classList.toggle("active", view.id === name));
+    }
+
+    function loadRubric() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(RUBRIC_KEY) || "[]");
+        if (Array.isArray(saved) && saved.length) {
+          const cleaned = saved.map(normalizeRubricItem).filter(x => isRealTitle(x.title) || x.detail);
+          if (cleaned.length) return cleaned;
+        }
+      } catch(e){}
+      return [];
+    }
+
+    function isRealTitle(value) {
+      const text = String(value || "").trim();
+      return text && !["none", "null", "undefined"].includes(text.toLowerCase());
+    }
+
+    function normalizeRubricItem(item) {
+      if (typeof item === "string") return { title: isRealTitle(item) ? item : "", detail: "", enabled: true };
+      return {
+        title: item.title || item.text || item.name || item.label || item.criterion || "",
+        detail: item.detail || "",
+        enabled: item.enabled !== false,
+      };
+    }
+
+    function syncRubricInput() {
+      localStorage.setItem(RUBRIC_KEY, JSON.stringify(rubric));
+      rubricInput.value = JSON.stringify(
+        rubric
+          .filter(x => x.enabled && (isRealTitle(x.title) || x.detail.trim()))
+          .map(x => ({ title: x.title.trim() || "未命名", detail: x.detail.trim() }))
+      );
+    }
+
+    function renderRubric() {
+      rubricList.innerHTML = rubric.length ? rubric.map((item, i) => `
+        <div class="rubric-row" data-i="${i}">
+          <input type="checkbox" ${item.enabled ? "checked" : ""} aria-label="启用">
+          <div class="rubric-fields">
+            <input class="rubric-title" type="text" value="${escapeHtml(item.title)}" placeholder="标题，如：表达清晰">
+            <textarea class="rubric-detail" rows="3" placeholder="标准细节：要观察什么，怎样判断好坏">${escapeHtml(item.detail)}</textarea>
+          </div>
+          <button type="button" class="btn-sm" title="删除">×</button>
+        </div>
+      `).join("") : '<div class="empty" style="padding:12px 0;text-align:left">还没有评价标准。可以手动添加，或导入别人导出的标准。</div>';
+      syncRubricInput();
+    }
+
+    function updateRubricRow(row) {
+      rubric[Number(row.dataset.i)].title = row.querySelector(".rubric-title").value;
+      rubric[Number(row.dataset.i)].detail = row.querySelector(".rubric-detail").value;
+      rubric[Number(row.dataset.i)].enabled = row.querySelector("input").checked;
+      syncRubricInput();
+    }
+
+    rubricList.addEventListener("input", (e) => {
+      const row = e.target.closest(".rubric-row");
+      if (row) updateRubricRow(row);
+    });
+    rubricList.addEventListener("change", (e) => {
+      const row = e.target.closest(".rubric-row");
+      if (row) updateRubricRow(row);
+    });
+
+    rubricList.addEventListener("click", (e) => {
+      const btn = e.target.closest("button");
+      if (!btn) return;
+      rubric.splice(Number(btn.closest(".rubric-row").dataset.i), 1);
+      renderRubric();
+    });
+
+    addRubricBtn.addEventListener("click", () => {
+      rubric.push({ title: "", detail: "", enabled: true });
+      renderRubric();
+      rubricList.lastElementChild?.querySelector(".rubric-title")?.focus();
+    });
+
+    exportRubricBtn.addEventListener("click", () => {
+      syncRubricInput();
+      const blob = new Blob([rubricInput.value || "[]"], { type: "application/json;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "评价标准.json";
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    importRubricBtn.addEventListener("click", () => importRubricFile.click());
+    importRubricFile.addEventListener("change", async () => {
+      const file = importRubricFile.files?.[0];
+      importRubricFile.value = "";
+      if (!file) return;
+      try {
+        const data = JSON.parse(await file.text());
+        if (!Array.isArray(data)) throw new Error("文件格式不是评价标准列表");
+        rubric = data.map(normalizeRubricItem).filter(x => isRealTitle(x.title) || x.detail);
+        renderRubric();
+      } catch(e) {
+        await showAlert(e.message || "导入失败");
+      }
+    });
+
+    renderRubric();
+    form.addEventListener("submit", syncRubricInput, true);
+
+    // ═══ 音频范围滑杆 ═══
+    const audioInput = document.getElementById("audio");
+    const rangeGroup = document.getElementById("rangeGroup");
+    const rangeStartSlider = document.getElementById("rangeStartSlider");
+    const rangeEndSlider = document.getElementById("rangeEndSlider");
+    const rangeStartLabel = document.getElementById("rangeStartLabel");
+    const rangeEndLabel = document.getElementById("rangeEndLabel");
+    const rangeDurationLabel = document.getElementById("rangeDurationLabel");
+    const rangeStartInput = document.getElementById("rangeStartInput");
+    const rangeEndInput = document.getElementById("rangeEndInput");
+    const rangeTrack = document.querySelector(".range-track");
+    let audioDuration = 0;
+
+    function fmtTime(sec) {
+      const m = Math.floor(sec / 60);
+      const s = Math.floor(sec % 60);
+      return `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+    }
+
+    function updateRangeUI() {
+      const sVal = parseFloat(rangeStartSlider.value);
+      const eVal = parseFloat(rangeEndSlider.value);
+      const max = parseFloat(rangeStartSlider.max) || 100;
+      const startSec = (sVal / max) * audioDuration;
+      const endSec = (eVal / max) * audioDuration;
+      rangeStartLabel.textContent = fmtTime(startSec);
+      rangeEndLabel.textContent = fmtTime(endSec);
+      rangeStartInput.value = Math.round(startSec);
+      rangeEndInput.value = endSec >= audioDuration ? "" : Math.round(endSec);
+      // 更新轨道高亮
+      const pctLeft = (sVal / max) * 100;
+      const pctRight = ((max - eVal) / max) * 100;
+      rangeTrack.style.setProperty("--track-left", pctLeft + "%");
+      rangeTrack.style.setProperty("--track-right", pctRight + "%");
+    }
+
+    // 滑杆事件：保证 start <= end
+    rangeStartSlider.addEventListener("input", () => {
+      if (parseFloat(rangeStartSlider.value) > parseFloat(rangeEndSlider.value)) {
+        rangeStartSlider.value = rangeEndSlider.value;
+      }
+      updateRangeUI();
+    });
+    rangeEndSlider.addEventListener("input", () => {
+      if (parseFloat(rangeEndSlider.value) < parseFloat(rangeStartSlider.value)) {
+        rangeEndSlider.value = rangeStartSlider.value;
+      }
+      updateRangeUI();
+    });
+    // 拖拽时 z-index 提升
+    rangeStartSlider.addEventListener("mousedown", () => rangeStartSlider.classList.add("dragging"));
+    rangeStartSlider.addEventListener("mouseup", () => rangeStartSlider.classList.remove("dragging"));
+    rangeEndSlider.addEventListener("mousedown", () => rangeEndSlider.classList.add("dragging"));
+    rangeEndSlider.addEventListener("mouseup", () => rangeEndSlider.classList.remove("dragging"));
+
+    // 选择音频后读取时长
+    audioInput.addEventListener("change", () => {
+      const file = audioInput.files[0];
+      if (!file) { rangeGroup.style.display = "none"; return; }
+      const url = URL.createObjectURL(file);
+      const tempAudio = new Audio(url);
+      tempAudio.addEventListener("loadedmetadata", () => {
+        audioDuration = tempAudio.duration;
+        URL.revokeObjectURL(url);
+        rangeGroup.style.display = "block";
+        // 重置滑杆
+        rangeStartSlider.max = 1000;
+        rangeEndSlider.max = 1000;
+        rangeStartSlider.value = 0;
+        rangeEndSlider.value = 1000;
+        rangeDurationLabel.textContent = fmtTime(audioDuration);
+        updateRangeUI();
+      });
+    });
+
+    // 持久化 API Keys（localStorage）— 带掩码显示
+    const keysTextarea = document.getElementById("keysTextarea");
+    const toggleKeysBtn = document.getElementById("toggleKeysBtn");
+    let keysRevealed = false;
+
+    function maskKey(k) {
+      if (k.length <= 12) return k.slice(0, 4) + "***" + k.slice(-4);
+      return k.slice(0, 8) + "***" + k.slice(-4);
+    }
+
+    function maskKeys(text) {
+      return text.split("\n").map(line => {
+        const t = line.trim();
+        if (!t || !t.startsWith("gsk_")) return line;
+        return maskKey(t);
+      }).join("\n");
+    }
+
+    if (keysTextarea) {
+      const saved = localStorage.getItem("groq_api_keys");
+      if (saved) {
+        keysTextarea.dataset.full = saved;
+        keysTextarea.value = maskKeys(saved);
+        keysTextarea.readOnly = true;
+      }
+      keysTextarea.addEventListener("input", () => {
+        if (!keysTextarea.value.includes("***")) {
+          keysTextarea.dataset.full = keysTextarea.value;
+          localStorage.setItem("groq_api_keys", keysTextarea.value);
+        }
+      });
+    }
+
+    toggleKeysBtn.addEventListener("click", () => {
+      keysRevealed = !keysRevealed;
+      toggleKeysBtn.textContent = keysRevealed ? "隐藏" : "显示";
+      toggleKeysBtn.title = keysRevealed ? "隐藏完整 Key" : "显示完整 Key";
+      if (keysRevealed) {
+        keysTextarea.value = keysTextarea.dataset.full || keysTextarea.value;
+        keysTextarea.readOnly = false;
+      } else {
+        const full = keysTextarea.dataset.full || keysTextarea.value;
+        if (!full.includes("***")) localStorage.setItem("groq_api_keys", full);
+        keysTextarea.dataset.full = full;
+        keysTextarea.value = maskKeys(full);
+        keysTextarea.readOnly = true;
+      }
+    });
+
+    // 提交表单前还原完整 key
+    form.addEventListener("submit", () => {
+      if (!keysRevealed && keysTextarea.dataset.full) {
+        keysTextarea.value = keysTextarea.dataset.full;
+      }
+      if (!keysTextarea.value.includes("***")) {
+        keysTextarea.dataset.full = keysTextarea.value;
+        localStorage.setItem("groq_api_keys", keysTextarea.value);
+      }
+    }, true); // useCapture 确保在其它 submit 之前
+
+    // 参考稿管理（localStorage）
+    const MANUSCRIPTS_KEY = "groq_manuscripts";
+    const scriptTextarea = document.getElementById("script");
+    const manuscriptFile = document.getElementById("manuscriptFile");
+    const manuscriptSelect = document.getElementById("manuscriptSelect");
+    const manuscriptDeleteBtn = document.getElementById("manuscriptDeleteBtn");
+
+    /** 读取所有已保存文稿 */
+    function loadManuscripts() {
+      try { return JSON.parse(localStorage.getItem(MANUSCRIPTS_KEY)) || []; }
+      catch(e){ return []; }
+    }
+
+    /** 保存文稿列表 */
+    function saveManuscripts(list) {
+      localStorage.setItem(MANUSCRIPTS_KEY, JSON.stringify(list));
+    }
+
+    /** 刷新下拉菜单 */
+    function renderManuscriptSelect(selectedId) {
+      const list = loadManuscripts();
+      manuscriptSelect.innerHTML = '<option value="">— 选择已保存的文稿 —</option>';
+      list.forEach((m, i) => {
+        const opt = document.createElement("option");
+        opt.value = i;
+        opt.textContent = m.name + (m.name === selectedId ? "" : "");
+        manuscriptSelect.appendChild(opt);
+      });
+      if (selectedId !== undefined) {
+        manuscriptSelect.value = selectedId;
+      }
+      const hasManuscripts = list.length > 0;
+      manuscriptDeleteBtn.hidden = !hasManuscripts || manuscriptSelect.value === "";
+    }
+
+    /** 上传文件 → 读取内容 → 保存到 localStorage */
+    manuscriptFile.addEventListener("change", () => {
+      const file = manuscriptFile.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const content = e.target.result;
+        const list = loadManuscripts();
+        // 如果同名已存在，替换
+        const idx = list.findIndex(m => m.name === file.name);
+        if (idx >= 0) {
+          list[idx].content = content;
+        } else {
+          list.push({ name: file.name, content });
+        }
+        saveManuscripts(list);
+        // 加载到 textarea 并选中
+        scriptTextarea.value = content;
+        renderManuscriptSelect(list.length - 1);
+        // 立即存到 localStorage（textarea 内容）
+        localStorage.setItem("groq_current_script", JSON.stringify({ name: file.name, content }));
+      };
+      reader.readAsText(file, "utf-8");
+      manuscriptFile.value = ""; // 允许重复选择同一文件
+    });
+
+    /** 下拉选择 → 加载文稿到 textarea */
+    manuscriptSelect.addEventListener("change", () => {
+      const i = manuscriptSelect.value;
+      if (i === "") {
+        manuscriptDeleteBtn.hidden = true;
+        scriptTextarea.value = "";
+        localStorage.removeItem("groq_current_script");
+        return;
+      }
+      const list = loadManuscripts();
+      const m = list[parseInt(i)];
+      if (m) {
+        scriptTextarea.value = m.content;
+        localStorage.setItem("groq_current_script", JSON.stringify({ name: m.name, content: m.content }));
+      }
+      manuscriptDeleteBtn.hidden = false;
+    });
+
+    /** 删除文稿 */
+    manuscriptDeleteBtn.addEventListener("click", () => {
+      const i = parseInt(manuscriptSelect.value);
+      if (isNaN(i)) return;
+      const list = loadManuscripts();
+      if (i >= 0 && i < list.length) {
+        list.splice(i, 1);
+        saveManuscripts(list);
+        scriptTextarea.value = "";
+        localStorage.removeItem("groq_current_script");
+        renderManuscriptSelect();
+        manuscriptDeleteBtn.hidden = true;
+      }
+    });
+
+    /** textarea 内容变化时，自动保存到当前选中文稿 */
+    scriptTextarea.addEventListener("input", () => {
+      const i = manuscriptSelect.value;
+      if (i === "") {
+        // 没有选中文稿，但内容不为空 → 保存为临时
+        if (scriptTextarea.value.trim()) {
+          localStorage.setItem("groq_current_script", JSON.stringify({ name: "__temp__", content: scriptTextarea.value }));
+        }
+        return;
+      }
+      const list = loadManuscripts();
+      const idx = parseInt(i);
+      if (idx >= 0 && idx < list.length) {
+        list[idx].content = scriptTextarea.value;
+        saveManuscripts(list);
+      }
+    });
+
+    // 恢复上次使用的文稿
+    (function restoreManuscript() {
+      const saved = localStorage.getItem("groq_current_script");
+      if (saved) {
+        try {
+          const { name, content } = JSON.parse(saved);
+          if (content) {
+            scriptTextarea.value = content;
+            // 尝试在下拉中选中同名文稿
+            const list = loadManuscripts();
+            const idx = list.findIndex(m => m.name === name);
+            renderManuscriptSelect(idx >= 0 ? idx : "");
+          }
+        } catch(e){}
+      } else {
+        renderManuscriptSelect();
+      }
+    })();
+
+	    form.addEventListener("submit", async (event) => {
+	      event.preventDefault();
+	      startBtn.disabled = true;
+	      statusBox.hidden = false;
+	      emptyState.hidden = true;
+	      resultArea.hidden = true;
+      resultTable.hidden = true;
+      resultBody.textContent = "";
+      reviewText.hidden = true;
+      reviewText.dataset.available = "0";
+      reviewModeTabs.hidden = true;
+      reviewTranscriptPane.hidden = true;
+      reviewTranscriptPane.dataset.available = "0";
+      reviewEmpty.hidden = false;
+      renderedParagraphs = 0;
+      setStatus({ status: "queued", progress: 0, message: "上传中..." });
+
+      try {
+        const response = await fetch("/api/jobs", { method: "POST", body: new FormData(form) });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "创建任务失败");
+        currentJobId = data.id;
+        poll(data.id);
+      } catch (error) {
+        startBtn.disabled = false;
+        setStatus({ status: "error", progress: 100, message: error.message });
+      }
+    });
+
+    async function poll(jobId) {
+      clearInterval(pollTimer);
+      const tick = async () => {
+        try {
+          const [statusResp, resultResp] = await Promise.all([
+            fetch(`/api/jobs/${jobId}`),
+            fetch(`/api/jobs/${jobId}/result`),
+          ]);
+          const data = await statusResp.json();
+
+          // 尝试获取阶段性结果（可能还没数据）
+          if (resultResp.ok) {
+            const partial = await resultResp.json();
+            if (partial && partial.paragraphs) {
+              renderPartialResult(partial, jobId);
+            }
+          }
+
+          setStatus(data);
+          if (data.status === "done") {
+            clearInterval(pollTimer);
+            startBtn.disabled = false;
+            pauseBtn.hidden = true;
+            resumeBtn.hidden = true;
+            // 最终结果：重新请求（body 可能已被阶段性读取消费）
+            try {
+              const finalResp = await fetch(`/api/jobs/${jobId}/result`);
+              if (finalResp.ok) {
+                renderResult(await finalResp.json(), jobId);
+              }
+            } catch(e){}
+            loadHistory(); // 刷新历史
+            loadReviewHistory(); // 刷新评价页历史
+          }
+          if (data.status === "error") {
+            clearInterval(pollTimer);
+            startBtn.disabled = false;
+            pauseBtn.hidden = true;
+            resumeBtn.hidden = true;
+            loadHistory();
+            loadReviewHistory(); // 刷新历史
+          }
+        } catch (error) {
+          // 忽略阶段性结果获取失败（还没数据是正常的）
+          if (error.message?.includes("result not ready")) return;
+          setStatus({ status: "error", progress: 100, message: error.message });
+          clearInterval(pollTimer);
+          startBtn.disabled = false;
+          pauseBtn.hidden = true;
+          resumeBtn.hidden = true;
+        }
+      };
+      await tick();
+      pollTimer = setInterval(tick, 2500);
+    }
+
+    /** ═══ 历史记录 ═══ */
+    function localJobMeta() {
+      try { return JSON.parse(localStorage.getItem(JOB_META_KEY) || "{}"); }
+      catch(e) { return {}; }
+    }
+
+    function setLocalJobMeta(id, meta) {
+      const all = localJobMeta();
+      all[id] = meta;
+      localStorage.setItem(JOB_META_KEY, JSON.stringify(all));
+    }
+
+    function withLocalMeta(j) {
+      const meta = localJobMeta()[j.id] || {};
+      return { ...j, display_name: j.display_name || meta.display_name || "", note: j.note || meta.note || "" };
+    }
+
+    function jobName(j) {
+      return j.display_name || j.audio_name || "未知";
+    }
+
+    function jobTitle(j) {
+      return j.note ? `${jobName(j)}\n备注：${j.note}` : jobName(j);
+    }
+
+    async function editJobMeta(id, currentName = "", currentNote = "") {
+      const values = await showModal({
+        title: "编辑记录",
+        fields: [
+          { placeholder: "显示名称", value: currentName || "" },
+          { type: "textarea", placeholder: "备注", value: currentNote || "" },
+        ],
+      });
+      if (!values) return false;
+      const [displayName, note] = values;
+      const meta = { display_name: displayName.trim(), note: note.trim() };
+      setLocalJobMeta(id, meta);
+      try {
+        const resp = await fetch(`/api/jobs/${id}/meta`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(meta),
+        });
+        if (!resp.ok && resp.status !== 404) await showAlert("已先保存到浏览器本地；写入文件失败。");
+      } catch(e) {}
+      return true;
+    }
+
+    async function loadHistory() {
+      try {
+        const resp = await fetch("/api/jobs");
+        if (!resp.ok) return;
+        const jobs = (await resp.json()).map(withLocalMeta);
+	        historyList.innerHTML = jobs.map(j => {
+	          const date = j.created_at ? new Date(j.created_at * 1000).toLocaleString("zh-CN", {month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}) : "";
+	          const statusClass = j.status === "done" ? "done" : j.status === "error" ? "error" : "running";
+	          const label = j.status === "done" ? "完成" : j.status === "error" ? "失败" : "处理中";
+	          return `<div class="history-item" data-id="${j.id}">
+	            <span class="h-status ${statusClass}">${label}</span>
+	            <span class="h-name" title="${escapeHtml(jobTitle(j))}">${escapeHtml(jobName(j))}</span>
+	            <span class="h-time">${date}</span>
+	            <button class="hist-edit" data-id="${j.id}" data-name="${escapeHtml(j.display_name || "")}" data-note="${escapeHtml(j.note || "")}" title="编辑名称/备注">✎</button>
+	            <button class="hist-del" data-id="${j.id}" title="删除">✕</button>
+	          </div>`;
+	        }).join("");
+	        // 点击历史条目查看结果
+	        historyList.querySelectorAll(".history-item").forEach(el => {
+	          el.addEventListener("click", (e) => {
+	            if (e.target.closest(".hist-del,.hist-edit")) return; // 不触发按钮
+	            const id = el.dataset.id;
+	            fetch(`/api/jobs/${id}/result`).then(r => r.ok && r.json()).then(result => {
+	              if (result && result.paragraphs) {
+	                emptyState.hidden = true;
+	                renderedParagraphs = 0;
+	                resultBody.textContent = "";
+	                renderResult(result, id);
+	              }
+	            }).catch(() => {});
+	          });
+	        });
+        historyList.querySelectorAll(".hist-edit").forEach(btn => {
+          btn.addEventListener("click", async (e) => {
+            e.stopPropagation();
+            if (await editJobMeta(btn.dataset.id, btn.dataset.name, btn.dataset.note)) {
+              loadHistory();
+              loadReviewHistory();
+            }
+          });
+        });
+        // 删除按钮
+	        historyList.querySelectorAll(".hist-del").forEach(btn => {
+	          btn.addEventListener("click", async (e) => {
+	            e.stopPropagation();
+	            if (!await showConfirm("确定删除这条转录记录？\n此操作不可撤销。")) return;
+	            const id = btn.dataset.id;
+	            try {
+	              const res = await fetch(`/api/jobs/${id}`, { method: "DELETE" });
+	              if (!res.ok) console.error("删除失败", await res.text());
+	              loadHistory();
+	            } catch (err) { console.error("删除出错", err); }
+	          });
+	        });
+      } catch(e){}
+    }
+    loadHistory();
+
+    async function clearAllHistory() {
+      if (!await showConfirm("确定清空所有历史记录？\n这会删除本机 data 目录里的所有录音、切片、转录和评价结果。")) return;
+      const resp = await fetch("/api/jobs", { method: "DELETE" });
+      if (!resp.ok) {
+        await showAlert("清空失败");
+        return;
+      }
+      localStorage.removeItem(JOB_META_KEY);
+      Object.keys(localStorage).filter(k => k.startsWith("annot_")).forEach(k => localStorage.removeItem(k));
+      historyList.textContent = "";
+      reviewHistoryList.textContent = "";
+      clearAnnotationSelection();
+      reviewEmpty.hidden = false;
+      reviewText.hidden = true;
+      reviewTableWrap.hidden = true;
+      reviewSummary.hidden = true;
+      loadHistory();
+      loadReviewHistory();
+    }
+
+    clearHistoryBtn?.addEventListener("click", clearAllHistory);
+    clearReviewHistoryBtn?.addEventListener("click", clearAllHistory);
+
+    /** 增量渲染：只追加新段落 */
+    /** ═══ 标注读写 ═══ */
+    function annotKey(jobId, paraId) {
+      return `annot_${jobId}_${paraId}`;
+    }
+
+    function paragraphKey(p, fallback = "") {
+      return String(p.timestamp || p.id || fallback || "");
+    }
+
+    function getParagraphAnnot(jobId, p, fallback = "") {
+      const key = paragraphKey(p, fallback);
+      let a = getAnnot(jobId, key);
+      const oldKey = String(p.id || "");
+      if (!a.color && !a.note && oldKey && oldKey !== key) {
+        const old = getAnnot(jobId, oldKey);
+        if (old.color || old.note) {
+          localStorage.setItem(annotKey(jobId, key), JSON.stringify(old));
+          a = old;
+        }
+      }
+      return a;
+    }
+
+    function loadServerAnnotations(jobId, result) {
+      Object.entries(result.annotations || {}).forEach(([paraId, annotation]) => {
+        if (!localStorage.getItem(annotKey(jobId, paraId))) {
+          localStorage.setItem(annotKey(jobId, paraId), JSON.stringify(annotation));
+        }
+      });
+    }
+
+    function getAnnot(jobId, paraId) {
+      try { return JSON.parse(localStorage.getItem(annotKey(jobId, paraId))) || {}; }
+      catch(e){ return {}; }
+    }
+
+    function setSaveStatus(state) {
+      clearTimeout(saveStatusTimer);
+      saveStatus.hidden = false;
+      saveStatus.className = `save-status ${state}`;
+      saveStatus.textContent = state === "saving" ? "保存中..." : state === "saved" ? "已保存" : "保存失败";
+      if (state !== "saving") saveStatusTimer = setTimeout(() => { saveStatus.hidden = true; }, 2200);
+    }
+
+    function beginSave() {
+      pendingSaves++;
+      setSaveStatus("saving");
+    }
+
+    function finishSave(ok) {
+      pendingSaves = Math.max(0, pendingSaves - 1);
+      if (pendingSaves) return;
+      setSaveStatus(ok ? "saved" : "error");
+    }
+
+    function persistAnnot(jobId, paraId, annotation) {
+      beginSave();
+      fetch(`/api/jobs/${jobId}/annotations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ para_id: String(paraId), annotation }),
+      }).then(r => finishSave(r.ok)).catch(() => finishSave(false));
+    }
+
+    function setAnnot(jobId, paraId, data) {
+      const old = getAnnot(jobId, paraId);
+      const merged = { ...old, ...data };
+      localStorage.setItem(annotKey(jobId, paraId), JSON.stringify(merged));
+      persistAnnot(jobId, paraId, merged);
+    }
+
+    function syncLocalAnnotations(jobId, paragraphs) {
+      (paragraphs || []).forEach((p) => {
+        const paraId = paragraphKey(p);
+        const a = getParagraphAnnot(jobId, p);
+        if (a.color || a.note) persistAnnot(jobId, paraId, a);
+      });
+    }
+
+    function annotationLabel(color) {
+      if (color === "green") return "好的点";
+      if (color === "red") return "有问题";
+      return "普通";
+    }
+
+    function speakerOptions(value) {
+      const normalized = value === "\u8bb2\u9053\u4eba" ? "发言人" : value;
+      return ["发言人", "听众", "其他"].map(x => `<option ${normalized === x ? "selected" : ""}>${x}</option>`).join("");
+    }
+
+    function updateParagraphCache(jobId, paraId, patch) {
+      if (jobId !== currentReviewJobId || !currentReviewResult) return;
+      const p = (currentReviewResult.paragraphs || []).find(x => String(x.id || x.timestamp || "") === String(paraId));
+      if (p) Object.assign(p, patch);
+    }
+
+    function persistParagraph(jobId, paraId, patch) {
+      if (!jobId || !paraId || !Object.keys(patch).length) return;
+      updateParagraphCache(jobId, paraId, patch);
+      beginSave();
+      fetch(`/api/jobs/${jobId}/paragraphs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ para_id: String(paraId), patch }),
+      }).then(r => finishSave(r.ok)).catch(() => finishSave(false));
+    }
+
+    function saveParagraphEdit(e, getJobId) {
+      const target = e.target.closest("[data-field]");
+      const tr = e.target.closest("tr");
+      if (!target || !tr) return;
+      const jobId = getJobId ? getJobId() : currentJobId;
+      const value = target.tagName === "SELECT" ? target.value : target.textContent.trim();
+      persistParagraph(jobId, tr.dataset.paraId, { [target.dataset.field]: value });
+    }
+
+    function renderReviewText(text) {
+      const escaped = escapeHtml(text || "");
+      return escaped.replace(/\b\d{2}:\d{2}:\d{2}\b/g, ts =>
+        `<button class="review-time-link" data-ts="${ts}" type="button">${ts}</button>`
+      );
+    }
+
+    function renderReviewItems(items) {
+      if (!Array.isArray(items) || !items.length) return "";
+      return `<div class="review-list">${items.map(item => `
+        <div class="review-item">
+          <div class="review-item-title">
+            ${item.time ? `<button class="review-time-link" data-ts="${escapeHtml(item.time)}" type="button">${escapeHtml(item.time)}</button>` : ""}
+            <span>${escapeHtml((item.criterion ? item.criterion + "：" : "") + (item.title || "观察"))}</span>
+          </div>
+          ${item.detail ? `<div class="review-item-detail"><strong>问题位置：</strong>${escapeHtml(item.detail)}</div>` : ""}
+          ${item.reason ? `<div class="review-item-detail"><strong>原因：</strong>${escapeHtml(item.reason)}</div>` : ""}
+          ${item.impact ? `<div class="review-item-detail"><strong>影响：</strong>${escapeHtml(item.impact)}</div>` : ""}
+          ${item.suggestion ? `<div class="review-item-suggestion"><strong>改法：</strong>${escapeHtml(item.suggestion)}</div>` : ""}
+          ${item.practice ? `<div class="review-item-suggestion"><strong>下次练习目标：</strong>${escapeHtml(item.practice)}</div>` : ""}
+        </div>`).join("")}</div>`;
+    }
+
+    function criterionTitle(item) {
+      const title = typeof item === "string" ? item : (item?.title || item?.text || item?.name || item?.label || item?.criterion || "");
+      return isRealTitle(title) ? String(title).trim() : "";
+    }
+
+    function sameCriterion(a, b) {
+      return String(a || "").trim() === String(b || "").trim();
+    }
+
+    function populateReviewCriterionSelect(result) {
+      const titles = rubric.filter(x => x.enabled).map(x => criterionTitle(x)).filter(Boolean);
+      reviewCriterionSelect.innerHTML = '<option value="">评价总结：全部标准</option>' +
+        titles.map(title => `<option value="${escapeHtml(title)}">${escapeHtml(title)}</option>`).join("");
+    }
+
+    function renderStructuredReview(review, criterion = "") {
+      if (!review || !Object.keys(review).length) return "";
+      const section = (title, body) => body ? `<section class="review-section"><h3>${title}</h3>${body}</section>` : "";
+      const grouped = (title, value) => {
+        if (!value) return "";
+        if (Array.isArray(value)) return section(title, renderReviewItems(value));
+        return section(title, `${value.summary ? `<p>${escapeHtml(value.summary)}</p>` : ""}${renderReviewItems(value.items)}`);
+      };
+      if (criterion) {
+        const items = (review.focus || []).filter(item => sameCriterion(item.criterion, criterion));
+        return `<div class="review-report">
+          ${section(`评价总结：${escapeHtml(criterion)}`, renderReviewItems(items) || "<p>这条历史评价没有按这个标准单独返回内容。</p>")}
+        </div>`;
+      }
+      return `<div class="review-report">
+        ${section("总评", review.overall ? `<p>${escapeHtml(review.overall)}</p>` : "")}
+        ${grouped("主要优点", review.strengths)}
+        ${grouped("主要问题", review.issues)}
+        ${grouped("针对评价标准", review.focus)}
+      </div>`;
+    }
+
+    function renderReview(result) {
+      const structured = renderStructuredReview(result.structured_review, reviewCriterionSelect?.value || "");
+      return structured || renderReviewText(result.review || "");
+    }
+
+    function refreshReviewText() {
+      if (!currentReviewResult) return;
+      reviewText.innerHTML = renderReview(currentReviewResult);
+      reviewText.dataset.available = "1";
+      setReviewMode("summary");
+    }
+
+    function setReviewMode(mode = "summary") {
+      const hasSummary = reviewText.dataset.available === "1";
+      const hasTranscript = reviewTranscriptPane.dataset.available === "1";
+      if (mode === "summary" && !hasSummary) mode = "transcript";
+      if (mode === "transcript" && !hasTranscript) mode = "summary";
+      reviewModeTabs.hidden = !(hasSummary && hasTranscript);
+      reviewText.hidden = !(mode === "summary" && hasSummary);
+      reviewTranscriptPane.hidden = !(mode === "transcript" && hasTranscript);
+      reviewResultHeader.dataset.mode = mode;
+      reviewModeTabs.querySelectorAll(".review-tab").forEach(btn => {
+        btn.classList.toggle("active", btn.dataset.reviewMode === mode);
+      });
+    }
+
+    reviewCriterionSelect.addEventListener("change", refreshReviewText);
+    reviewModeTabs.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-review-mode]");
+      if (btn) setReviewMode(btn.dataset.reviewMode);
+    });
+    function tsToSeconds(ts) {
+      const parts = String(ts || "").split(":").map(Number);
+      if (parts.length !== 3 || parts.some(Number.isNaN)) return 0;
+      return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    }
+
+    function setPlayerSource(player, bar, jobId) {
+      if (!player || !bar || !jobId) return;
+      const src = `/api/jobs/${jobId}/audio`;
+      if (!player.getAttribute("src")?.endsWith(src)) player.src = src;
+      bar.hidden = false;
+    }
+
+    function playAt(player, seconds) {
+      if (!player || !player.src) return;
+      player.currentTime = Math.max(0, seconds || 0);
+      player.play().catch(() => {});
+    }
+
+    function updateReviewSummary(jobId, paragraphs) {
+      let issues = 0, highlights = 0, notes = 0;
+      (paragraphs || []).forEach((p) => {
+        const a = getParagraphAnnot(jobId, p);
+        if (a.color === "red") issues++;
+        if (a.color === "green") highlights++;
+        if (a.note) notes++;
+      });
+      summaryIssues.textContent = issues;
+      summaryHighlights.textContent = highlights;
+      summaryNotes.textContent = notes;
+      reviewSummary.hidden = false;
+    }
+
+    function applyReviewFilter() {
+      reviewResultBody.querySelectorAll("tr").forEach((row) => {
+        const show =
+          currentReviewFilter === "all" ||
+          row.dataset.color === currentReviewFilter ||
+          (currentReviewFilter === "note" && row.dataset.hasNote === "1");
+        row.hidden = !show;
+      });
+      updateAnnotationViews();
+    }
+
+    function annotationSideRect() {
+      return reviewHistoryList.closest(".history-section").getBoundingClientRect();
+    }
+
+    function placeAnnotationBox(box, row, height) {
+      const side = annotationSideRect();
+      const rect = row.getBoundingClientRect();
+      box.style.left = `${side.left}px`;
+      box.style.top = `${rect.top + rect.height / 2 - height / 2}px`;
+      box.style.width = `${side.width}px`;
+    }
+
+    function updateAnnotationLink() {
+      if (!selectedAnnotation || annotationPanel.hidden || selectedAnnotation.tr.hidden) {
+        annotationLink.hidden = true;
+        return;
+      }
+      updateAnnotationPanelPosition();
+      placeAnnotationLine(annotationLink, annotationPanel, selectedAnnotation.tr);
+    }
+
+    function updateAnnotationPanelPosition() {
+      if (!selectedAnnotation || annotationPanel.hidden || window.innerWidth <= 820) return;
+      placeAnnotationBox(annotationPanel, selectedAnnotation.tr, annotationPanel.offsetHeight || 260);
+    }
+
+    function placeAnnotationLine(line, box, row) {
+      const from = box.getBoundingClientRect();
+      const to = row.getBoundingClientRect();
+      const x1 = from.right;
+      const y1 = from.top + from.height / 2;
+      const x2 = to.left;
+      const y2 = to.top + to.height / 2;
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      line.hidden = dx <= 0;
+      line.style.left = `${x1}px`;
+      line.style.top = `${y1}px`;
+      line.style.width = `${Math.hypot(dx, dy)}px`;
+      line.style.transform = `rotate(${Math.atan2(dy, dx)}rad)`;
+    }
+
+    function renderPinnedAnnotationNotes() {
+      annotationNoteLayer.textContent = "";
+      if (!currentReviewJobId || window.innerWidth <= 820) return;
+      reviewResultBody.querySelectorAll("tr[data-has-note='1']").forEach(row => {
+        if (selectedAnnotation?.tr === row || row.hidden) return;
+        const rect = row.getBoundingClientRect();
+        if (rect.bottom < -120 || rect.top > window.innerHeight + 120) return;
+        const note = getAnnot(currentReviewJobId, row.dataset.paraId).note || "";
+        if (!note) return;
+        const card = document.createElement("button");
+        card.type = "button";
+        card.className = "annotation-note-card";
+        card.dataset.paraId = row.dataset.paraId;
+        card.innerHTML = `<span class="annotation-time">${escapeHtml(row.querySelector(".ts-text")?.textContent || "")}</span><p>${escapeHtml(note)}</p>`;
+        annotationNoteLayer.appendChild(card);
+        placeAnnotationBox(card, row, card.offsetHeight || 96);
+        const line = document.createElement("div");
+        line.className = "annotation-link pinned";
+        annotationNoteLayer.appendChild(line);
+        placeAnnotationLine(line, card, row);
+      });
+    }
+
+    function updateAnnotationViews() {
+      updateAnnotationLink();
+      renderPinnedAnnotationNotes();
+    }
+
+    function clearAnnotationSelection() {
+      selectedAnnotation?.tr?.classList.remove("selected-annotation");
+      selectedAnnotation = null;
+      annotationPanel.hidden = true;
+      annotationLink.hidden = true;
+      annotationPanel.style.left = "";
+      annotationPanel.style.top = "";
+      annotationPanel.style.width = "";
+      renderPinnedAnnotationNotes();
+    }
+
+    function showAnnotationPanel(jobId, paraId, tr) {
+      if (!annotationPanel || !tr) return;
+      reviewResultBody.querySelectorAll(".selected-annotation").forEach(row => row.classList.remove("selected-annotation"));
+      tr.classList.add("selected-annotation");
+      const a = getAnnot(jobId, paraId);
+      selectedAnnotation = { jobId, paraId, tr };
+      annotationPanel.hidden = false;
+      annotationTime.textContent = tr.querySelector(".ts-text")?.textContent || tr.querySelector(".time")?.textContent.trim() || "--:--:--";
+      annotationKind.textContent = annotationLabel(a.color);
+      annotationNote.value = a.note || "";
+      annotationNote.focus();
+      requestAnimationFrame(() => {
+        updateAnnotationViews();
+      });
+    }
+
+    window.addEventListener("resize", updateAnnotationViews);
+    window.addEventListener("scroll", updateAnnotationViews, true);
+
+    function syncRowNoteButton(tr, note) {
+      const timeCell = tr.querySelector(".time");
+      let indicator = tr.querySelector(".note-indicator");
+      if (note && !indicator) {
+        indicator = document.createElement("button");
+        indicator.className = "note-indicator at-note has";
+        indicator.dataset.anote = "";
+        indicator.type = "button";
+        indicator.textContent = "注";
+        const ts = timeCell.querySelector(".ts-text");
+        if (ts) ts.after(indicator);
+        else timeCell.appendChild(indicator);
+      }
+      if (indicator) {
+        indicator.hidden = !note;
+        indicator.title = note || "";
+        indicator.classList.toggle("has", !!note);
+      }
+      tr.querySelectorAll(".anno-toolbar .at-note").forEach(btn => {
+        btn.classList.toggle("has", !!note);
+        btn.title = note || "备注";
+        btn.textContent = note ? "注*" : "注";
+      });
+      tr.dataset.hasNote = note ? "1" : "0";
+    }
+
+    annotationNote.addEventListener("input", () => {
+      if (!selectedAnnotation) return;
+      const note = annotationNote.value.trim();
+      setAnnot(selectedAnnotation.jobId, selectedAnnotation.paraId, { note });
+      syncRowNoteButton(selectedAnnotation.tr, note);
+      const selected = reviewHistoryList.querySelector(".history-item.selected");
+      if (selected) updateReviewSummary(selected.dataset.id, Array.from(reviewResultBody.querySelectorAll("tr")).map(row => ({ id: row.dataset.paraId })));
+      applyReviewFilter();
+    });
+
+    annotationNoteLayer.addEventListener("click", (e) => {
+      const card = e.target.closest(".annotation-note-card");
+      if (!card || !currentReviewJobId) return;
+      const row = Array.from(reviewResultBody.querySelectorAll("tr")).find(tr => tr.dataset.paraId === card.dataset.paraId);
+      if (!row) return;
+      row.scrollIntoView({ behavior: "smooth", block: "center" });
+      showAnnotationPanel(currentReviewJobId, row.dataset.paraId, row);
+    });
+
+    function renderPartialResult(result, jobId) {
+      applyLanguageLabels(result);
+      loadServerAnnotations(jobId, result);
+      syncLocalAnnotations(jobId, result.paragraphs);
+      const paras = result.paragraphs || [];
+      if (paras.length <= renderedParagraphs) return;
+      if (renderedParagraphs === 0) {
+        emptyState.hidden = true;
+        downloadLink.href = `/api/jobs/${jobId}/download.md`;
+        setPlayerSource(audioPlayer, playerBar, jobId);
+        resultArea.hidden = false;
+        resultTable.hidden = false;
+      }
+      for (let i = renderedParagraphs; i < paras.length; i++) {
+        const p = paras[i];
+        const paraId = paragraphKey(p, i);
+        const a = getParagraphAnnot(jobId, p, i);
+        const colorClass = a.color ? `anno-${a.color}` : "";
+        const hasNote = a.note ? "has" : "";
+
+        const tr = document.createElement("tr");
+        tr.className = colorClass;
+        tr.dataset.paraId = paraId;
+        tr.innerHTML = `
+          <td class="time" data-label="时间">
+            <div class="time-tools">
+              <span class="ts-text">${escapeHtml(p.timestamp || "")}</span>${a.note ? `<button class="note-indicator at-note has" data-anote title="${escapeHtml(a.note)}" type="button">注</button>` : ""}
+              <span class="anno-toolbar">
+                <span class="at-dot g ${a.color === 'green' ? 'on' : ''}" data-ac="green" title="好的点"></span>
+                <span class="at-dot w ${!a.color || a.color === 'white' ? 'on' : ''}" data-ac="white" title="默认"></span>
+                <span class="at-dot r ${a.color === 'red' ? 'on' : ''}" data-ac="red" title="有问题"></span>
+                <button class="at-note ${hasNote}" data-anote title="${escapeHtml(a.note || "备注")}" type="button">${a.note ? "注*" : "注"}</button>
+              </span>
+            </div>
+          </td>
+          <td class="speaker" data-label="说话人">
+            <select data-field="speaker">
+              ${speakerOptions(p.speaker)}
+            </select>
+          </td>
+          <td class="fr" data-label="法语"><div class="celltext" data-field="fr" contenteditable="true">${escapeHtml(p.fr || p.fr_raw || "")}</div></td>
+          <td class="zh" data-label="中文"><div class="celltext" data-field="zh" contenteditable="true">${escapeHtml(p.zh || "")}</div></td>
+        `;
+        resultBody.appendChild(tr);
+      }
+      applyLanguageLabels(result, resultTableWrap);
+      renderedParagraphs = paras.length;
+    }
+
+    // ═══ 标注事件：颜色 + 备注弹出 ═══
+    let activePopup = null;
+
+    document.addEventListener("click", (e) => {
+      if (activePopup && !e.target.closest(".anno-popup") && !e.target.closest(".at-note")) {
+        activePopup.classList.remove("show");
+        activePopup = null;
+      }
+      if (
+        selectedAnnotation &&
+        !e.target.closest(".annotation-panel, .annotation-note-card, #reviewResultBody tr")
+      ) {
+        clearAnnotationSelection();
+      }
+    });
+
+    function handleAnnoClick(e, getJobId) {
+      const tr = e.target.closest("tr");
+      if (!tr) return;
+      const jobId = getJobId ? getJobId() : (currentJobId || tr.closest("[data-job]")?.dataset.job);
+      const paraId = tr.dataset.paraId;
+      if (!jobId || !paraId) return;
+
+      const dot = e.target.closest(".at-dot");
+      if (dot) {
+        const color = dot.dataset.ac;
+        const dots = tr.querySelectorAll(".at-dot");
+        const wasOn = dot.classList.contains("on");
+        dots.forEach(d => d.classList.remove("on"));
+        tr.classList.remove("anno-green", "anno-red");
+        if (!wasOn) {
+          dot.classList.add("on");
+          if (color === "green") tr.classList.add("anno-green");
+          if (color === "red") tr.classList.add("anno-red");
+          setAnnot(jobId, paraId, { color: color === "white" ? "" : color });
+          tr.dataset.color = color === "white" ? "" : color;
+        } else {
+          setAnnot(jobId, paraId, { color: "" });
+          tr.dataset.color = "";
+        }
+        const selected = reviewHistoryList.querySelector(".history-item.selected");
+        if (selected) updateReviewSummary(selected.dataset.id, Array.from(reviewResultBody.querySelectorAll("tr")).map(row => ({ id: row.dataset.paraId })));
+        applyReviewFilter();
+        return;
+      }
+
+      const noteBtn = e.target.closest(".at-note");
+      if (noteBtn) {
+        e.stopPropagation();
+        if (getJobId) {
+          showAnnotationPanel(jobId, paraId, tr);
+          return;
+        }
+        if (activePopup) { activePopup.classList.remove("show"); activePopup = null; }
+        const rect = noteBtn.getBoundingClientRect();
+        const popup = document.createElement("div");
+        popup.className = "anno-popup show";
+        popup.dataset.paraId = paraId;
+        popup.dataset.jobId = jobId;
+        const a = getAnnot(jobId, paraId);
+        popup.innerHTML = `
+          <div class="popup-header"><span>备注</span><button class="popup-close" type="button">✕</button></div>
+          <textarea placeholder="输入备注...">${escapeHtml(a.note || "")}</textarea>
+        `;
+        popup.querySelector("textarea").addEventListener("input", function() {
+          const hasValue = !!this.value.trim();
+          setAnnot(jobId, paraId, { note: this.value.trim() });
+          noteBtn.classList.toggle("has", hasValue);
+          if (noteBtn.classList.contains("note-indicator")) noteBtn.hidden = !hasValue;
+        });
+        popup.querySelector(".popup-close").addEventListener("click", () => {
+          popup.classList.remove("show"); activePopup = null;
+        });
+	        popup.style.left = Math.min(rect.left, window.innerWidth - 340) + "px";
+	        // 防底部超出视口
+	        const spaceBelow = window.innerHeight - rect.bottom;
+	        popup.style.top = (spaceBelow >= 200 ? rect.bottom : Math.max(8, rect.top - 260)) + 8 + "px";
+        document.body.appendChild(popup);
+        activePopup = popup;
+        return;
+      }
+
+      return;
+    }
+
+    reviewFilters.addEventListener("click", (e) => {
+      const btn = e.target.closest(".review-filter");
+      if (!btn) return;
+      currentReviewFilter = btn.dataset.filter;
+      reviewFilters.querySelectorAll(".review-filter").forEach(x => x.classList.toggle("active", x === btn));
+      applyReviewFilter();
+    });
+
+    reviewText.addEventListener("click", (e) => {
+      const btn = e.target.closest(".review-time-link");
+      if (!btn) return;
+      playAt(reviewAudioPlayer, tsToSeconds(btn.dataset.ts));
+      const row = Array.from(reviewResultBody.querySelectorAll("tr")).find(tr =>
+        tr.querySelector(".ts-text")?.textContent === btn.dataset.ts
+      );
+      if (!row) return;
+      row.hidden = false;
+      row.scrollIntoView({ behavior: "smooth", block: "center" });
+      const sel = reviewHistoryList.querySelector(".history-item.selected");
+      if (sel) showAnnotationPanel(sel.dataset.id, row.dataset.paraId, row);
+    });
+
+    document.querySelectorAll(".view-toggle").forEach((toggle) => {
+      toggle.addEventListener("click", (e) => {
+        const btn = e.target.closest("button[data-view]");
+        if (!btn) return;
+        const target = document.getElementById(toggle.dataset.target);
+        if (!target) return;
+        target.classList.remove("view-both", "view-zh", "view-fr");
+        target.classList.add(`view-${btn.dataset.view}`);
+        toggle.querySelectorAll("button").forEach(x => x.classList.toggle("active", x === btn));
+      });
+    });
+
+    // 转录页的标注
+    resultBody.addEventListener("change", (e) => saveParagraphEdit(e));
+    resultBody.addEventListener("blur", (e) => saveParagraphEdit(e), true);
+
+	    function highlightCurrentRow(player, tableBody) {
+	      if (!player || !player.src || !tableBody) return;
+	      const t = player.currentTime;
+	      let bestRow = null, bestDiff = Infinity;
+	      tableBody.querySelectorAll("tr").forEach(tr => {
+	        const ts = tr.querySelector(".ts-text")?.textContent;
+	        if (!ts) return;
+	        const sec = tsToSeconds(ts);
+	        const diff = t - sec;
+	        if (diff >= 0 && diff < bestDiff) { bestDiff = diff; bestRow = tr; }
+	      });
+	      tableBody.querySelectorAll("tr.current-playing").forEach(tr => tr.classList.remove("current-playing"));
+	      if (bestRow && bestDiff < 30) bestRow.classList.add("current-playing");
+	    }
+
+	    // 转录页播放器：实时高亮当前行
+	    audioPlayer.addEventListener("timeupdate", () => highlightCurrentRow(audioPlayer, resultBody));
+	    // 评价页播放器
+	    reviewAudioPlayer.addEventListener("timeupdate", () => highlightCurrentRow(reviewAudioPlayer, reviewResultBody));
+
+	    function playFromTimeCell(e, player) {
+	      if (e.target.closest(".anno-toolbar, .note-indicator")) return false;
+	      const timeCell = e.target.closest("td.time");
+	      const ts = timeCell?.querySelector(".ts-text");
+	      if (!ts) return false;
+	      playAt(player, tsToSeconds(ts.textContent));
+	      return true;
+	    }
+
+    resultBody.addEventListener("click", (e) => {
+      if (e.target.closest("[data-field]")) return;
+      if (playFromTimeCell(e, audioPlayer)) return;
+      handleAnnoClick(e);
+    });
+
+    // 评价页的标注
+    reviewResultBody.addEventListener("change", (e) => saveParagraphEdit(e, () => currentReviewJobId));
+    reviewResultBody.addEventListener("blur", (e) => saveParagraphEdit(e, () => currentReviewJobId), true);
+
+    reviewResultBody.addEventListener("click", (e) => {
+      if (e.target.closest("[data-field]")) return;
+      if (playFromTimeCell(e, reviewAudioPlayer)) {
+        const tr = e.target.closest("tr");
+        const sel = reviewHistoryList.querySelector(".history-item.selected");
+        if (tr && sel) showAnnotationPanel(sel.dataset.id, tr.dataset.paraId, tr);
+        return;
+      }
+      handleAnnoClick(e, () => {
+        const sel = reviewHistoryList.querySelector(".history-item.selected");
+        return sel ? sel.dataset.id : null;
+      });
+    });
+
+    function renderResult(result, jobId) {
+      applyLanguageLabels(result);
+      // 最终结果：全量渲染（覆盖增量结果）
+      renderedParagraphs = 0;
+      resultBody.textContent = "";
+      renderPartialResult(result, jobId);
+      currentReviewResult = result;
+      currentReviewJobId = jobId;
+      populateReviewCriterionSelect(result);
+
+      if (result.review || result.structured_review) {
+        reviewText.innerHTML = renderReview(result);
+        reviewText.dataset.available = "1";
+        reviewResultHeader.hidden = false;
+        setReviewMode("summary");
+        reviewEmpty.hidden = true;
+      }
+    }
+
+    function setStatus(data) {
+      const labels = {
+        queued: "排队中",
+        running: "处理中",
+        paused: "已暂停",
+        done: "完成",
+        error: "失败"
+      };
+      statusTitle.textContent = labels[data.status] || "处理中";
+      statusTitle.className = data.status === "done" ? "done" : data.status === "error" ? "error" : "";
+      progressFill.style.width = `${Math.max(0, Math.min(100, data.progress || 0))}%`;
+      statusMessage.textContent = data.message || "";
+
+      // 暂停/继续按钮
+      pauseBtn.hidden = data.status !== "running";
+      resumeBtn.hidden = data.status !== "paused";
+
+      // 暂停时禁用开始按钮，继续时恢复
+      if (data.status === "paused" || data.status === "running") {
+        startBtn.disabled = true;
+      }
+    }
+
+    // 暂停/继续 API 调用
+    pauseBtn.addEventListener("click", async () => {
+      if (!currentJobId) return;
+      try {
+        await fetch(`/api/jobs/${currentJobId}/pause`, { method: "POST" });
+      } catch(e){}
+    });
+
+    resumeBtn.addEventListener("click", async () => {
+      if (!currentJobId) return;
+      try {
+        await fetch(`/api/jobs/${currentJobId}/resume`, { method: "POST" });
+      } catch(e){}
+    });
+
+    /** ═══ 评价页面的历史记录 + 查看 ═══ */
+    async function loadReviewHistory() {
+      try {
+        const resp = await fetch("/api/jobs");
+        if (!resp.ok) return;
+        const jobs = (await resp.json()).map(withLocalMeta);
+	        reviewHistoryList.innerHTML = jobs.map(j => {
+	          const date = j.created_at ? new Date(j.created_at * 1000).toLocaleString("zh-CN", {month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}) : "";
+	          const sc = j.status === "done" ? "done" : j.status === "error" ? "error" : "running";
+		          const label = j.status === "done" ? "完成" : j.status === "error" ? "失败" : "处理中";
+		          return `<div class="history-item" data-id="${j.id}">
+		            <span class="h-status ${sc}">${label}</span>
+		            <span class="h-name" title="${escapeHtml(jobTitle(j))}">${escapeHtml(jobName(j))}</span>
+	            <span class="h-time">${date}</span>
+	            <button class="hist-edit" data-id="${j.id}" data-name="${escapeHtml(j.display_name || "")}" data-note="${escapeHtml(j.note || "")}" title="编辑名称/备注">✎</button>
+	            <button class="hist-del" data-id="${j.id}" title="删除">✕</button>
+	          </div>`;
+	        }).join("");
+		        reviewHistoryList.querySelectorAll(".history-item").forEach(el => {
+		          el.addEventListener("click", async (e) => {
+		            if (e.target.closest(".hist-del,.hist-edit")) return;
+		            reviewHistoryList.querySelectorAll(".history-item").forEach(x => x.classList.remove("selected"));
+		            el.classList.add("selected");
+		            const id = el.dataset.id;
+            try {
+              const r = await fetch(`/api/jobs/${id}/result`);
+              if (!r.ok) return;
+              const result = await r.json();
+              loadServerAnnotations(id, result);
+              syncLocalAnnotations(id, result.paragraphs);
+              reviewEmpty.hidden = true;
+              reviewText.hidden = true;
+              reviewText.dataset.available = "0";
+              reviewModeTabs.hidden = true;
+              reviewTranscriptPane.hidden = true;
+              reviewTranscriptPane.dataset.available = "0";
+              reviewResultHeader.hidden = true;
+              reviewTableWrap.hidden = true;
+              clearAnnotationSelection();
+              reviewSummary.hidden = true;
+              setPlayerSource(reviewAudioPlayer, reviewPlayerBar, id);
+              currentReviewResult = result;
+              currentReviewJobId = id;
+              applyLanguageLabels(result);
+              populateReviewCriterionSelect(result);
+              if (result.review || result.structured_review) {
+                reviewText.innerHTML = renderReview(result);
+                reviewText.dataset.available = "1";
+                reviewResultHeader.hidden = false;
+              }
+              if (result.paragraphs && result.paragraphs.length) {
+                reviewDownloadLink.href = `/api/jobs/${id}/download.md`;
+		                reviewResultHeader.hidden = false;
+		                reviewTableWrap.hidden = false;
+                reviewTranscriptPane.dataset.available = "1";
+                updateReviewSummary(id, result.paragraphs);
+		                reviewResultBody.innerHTML = result.paragraphs.map(p => {
+		                  const paraId = paragraphKey(p);
+		                  const a = getParagraphAnnot(id, p);
+		                  const colorClass = a.color ? `anno-${a.color}` : "";
+		                  const hasNote = a.note ? "has" : "";
+		                  return `<tr data-para-id="${escapeHtml(paraId)}" data-color="${escapeHtml(a.color || "")}" data-has-note="${a.note ? "1" : "0"}" class="${colorClass}">
+		                    <td class="time" data-label="时间">
+		                      <div class="time-tools">
+		                        <span class="ts-text">${escapeHtml(p.timestamp || "")}</span>${a.note ? `<button class="note-indicator at-note has" data-anote title="${escapeHtml(a.note)}" type="button">注</button>` : ""}
+		                        <span class="anno-toolbar">
+		                          <span class="at-dot g ${a.color === 'green' ? 'on' : ''}" data-ac="green" title="好的点"></span>
+		                          <span class="at-dot w ${!a.color || a.color === 'white' ? 'on' : ''}" data-ac="white" title="默认"></span>
+		                          <span class="at-dot r ${a.color === 'red' ? 'on' : ''}" data-ac="red" title="有问题"></span>
+		                          <button class="at-note ${hasNote}" data-anote title="${escapeHtml(a.note || "备注")}" type="button">${a.note ? "注*" : "注"}</button>
+		                        </span>
+		                      </div>
+		                    </td>
+		                    <td class="speaker" data-label="说话人"><select data-field="speaker">${speakerOptions(p.speaker)}</select></td>
+		                    <td class="fr" data-label="法语"><div class="celltext" data-field="fr" contenteditable="true">${escapeHtml(p.fr || p.fr_raw || "")}</div></td>
+		                    <td class="zh" data-label="中文"><div class="celltext" data-field="zh" contenteditable="true">${escapeHtml(p.zh || "")}</div></td>
+		                  </tr>`;
+		                }).join("");
+                applyLanguageLabels(result, reviewTranscriptPane);
+                currentReviewFilter = "all";
+                reviewFilters.querySelectorAll(".review-filter").forEach(x => x.classList.toggle("active", x.dataset.filter === "all"));
+                applyReviewFilter();
+	              }
+              setReviewMode("summary");
+	              if (!result.review && (!result.paragraphs || !result.paragraphs.length)) {
+                reviewEmpty.hidden = false;
+              }
+            } catch(e){}
+	          });
+	        });
+        reviewHistoryList.querySelectorAll(".hist-edit").forEach(btn => {
+          btn.addEventListener("click", async (e) => {
+            e.stopPropagation();
+            if (await editJobMeta(btn.dataset.id, btn.dataset.name, btn.dataset.note)) {
+              loadHistory();
+              loadReviewHistory();
+            }
+          });
+        });
+        // 删除按钮（评价页）
+	        reviewHistoryList.querySelectorAll(".hist-del").forEach(btn => {
+	          btn.addEventListener("click", async (e) => {
+	            e.stopPropagation();
+	            if (!await showConfirm("确定删除这条记录？\n此操作不可撤销。")) return;
+	            const id = btn.dataset.id;
+            try {
+              await fetch(`/api/jobs/${id}`, { method: "DELETE" });
+              loadReviewHistory();
+              reviewText.hidden = true;
+              reviewText.dataset.available = "0";
+              reviewSummary.hidden = true;
+              reviewPlayerBar.hidden = true;
+              reviewAudioPlayer.removeAttribute("src");
+              reviewAudioPlayer.load();
+              reviewResultHeader.hidden = true;
+              reviewTableWrap.hidden = true;
+              reviewModeTabs.hidden = true;
+              reviewTranscriptPane.hidden = true;
+              reviewTranscriptPane.dataset.available = "0";
+              clearAnnotationSelection();
+              currentReviewResult = null;
+              currentReviewJobId = null;
+              reviewEmpty.hidden = false;
+            } catch(e){}
+          });
+        });
+	      } catch(e){}
+	    }
+		    loadReviewHistory();
+
+		    /* ═══ 历史记录搜索筛选 ═══ */
+		    function setupHistoryFilter(inputId, listId) {
+		      const input = document.getElementById(inputId);
+		      const list = document.getElementById(listId);
+		      if (!input || !list) return;
+		      input.addEventListener("input", () => {
+		        const q = input.value.trim().toLowerCase();
+		        list.querySelectorAll(".history-item").forEach(el => {
+		          const name = el.querySelector(".h-name")?.textContent?.toLowerCase() || "";
+		          el.hidden = q && !name.includes(q);
+		        });
+		      });
+		    }
+		    setupHistoryFilter("historySearch", "historyList");
+		    setupHistoryFilter("reviewHistorySearch", "reviewHistoryList");
+
+		    /* ═══ 键盘快捷键 ═══ */
+	    document.addEventListener("keydown", (e) => {
+	      // Ctrl+Enter / Meta+Enter → 开始转录
+	      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+	        // 不要在评价页的 textarea 里触发表单
+	        if (document.activeElement?.closest(".review, #reviewText, .anno-popup textarea")) return;
+	        if (!startBtn.disabled) form.requestSubmit();
+	        return;
+	      }
+	      // Escape → 关闭标注弹窗 / 取消选中
+	      if (e.key === "Escape") {
+	        if (activePopup) {
+	          activePopup.classList.remove("show");
+	          activePopup = null;
+	        }
+	        clearAnnotationSelection();
+	        return;
+	      }
+	      // Ctrl+S → 手动保存（触发视觉反馈）
+	      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+	        e.preventDefault();
+	        setSaveStatus("saved");
+	        return;
+	      }
+	      // F → 全屏切换
+	      if (e.key === "f" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+	        if (!e.target.closest("input, select, textarea, [contenteditable]")) {
+	          e.preventDefault();
+	          if (!document.fullscreenElement) {
+	            document.documentElement.requestFullscreen().catch(() => {});
+	          } else {
+	            document.exitFullscreen().catch(() => {});
+	          }
+	        }
+	      }
+	    });
+
+	    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+    }
+  </script>
+</body>
+</html>
