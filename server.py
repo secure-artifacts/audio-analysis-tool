@@ -1,7 +1,6 @@
 ﻿from __future__ import annotations
 
 import json
-import mimetypes
 import os
 import re
 import shutil
@@ -40,7 +39,7 @@ LOG_LOCK = threading.Lock()
 SEGMENT_SECONDS = 8 * 60
 WHISPER_MODELS = {"whisper-large-v3-turbo", "whisper-large-v3"}
 DEFAULT_CHAT_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
-JOB_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
+JOB_ID_RE = re.compile(r"[0-9a-f]{12}")
 LANGUAGE_NAMES = {
     "fr": "法语",
     "en": "英语",
@@ -149,20 +148,18 @@ def safe_name(name: str) -> str:
 
 
 def clean_job_id(job_id: str) -> str:
-    job_id = str(job_id or "")
+    job_id = str(job_id or "").lower()
     if not JOB_ID_RE.fullmatch(job_id):
         raise ValueError("invalid job id")
-    return job_id
+    return f"{int(job_id, 16):012x}"
 
 
 def inside_dir(base: Path, path: Path) -> Path:
-    base = base.resolve()
-    path = path.resolve()
-    try:
-        path.relative_to(base)
-    except ValueError as exc:
-        raise ValueError("path escapes allowed directory") from exc
-    return path
+    base_text = os.path.abspath(os.fspath(base))
+    path_text = os.path.abspath(os.fspath(path))
+    if path_text != base_text and not path_text.startswith(base_text + os.sep):
+        raise ValueError("path escapes allowed directory")
+    return Path(path_text)
 
 
 def job_dir_for(job_id: str) -> Path:
@@ -196,15 +193,14 @@ def read_json_file(path: Path, encoding: str = "utf-8-sig") -> object:
 
 
 def remove_data_tree(path: Path) -> None:
-    shutil.rmtree(str(checked_data_path(path)))  # lgtm[py/path-injection]
+    shutil.rmtree(str(checked_data_path(path)), ignore_errors=True)  # lgtm[py/path-injection]
 
 
 def checked_read_path(path: Path) -> Path:
-    resolved = path.resolve()
-    root = ROOT.resolve()
-    if resolved == root / "index.html":
-        return resolved
-    return inside_dir(DATA_DIR, resolved)
+    path_text = os.path.abspath(os.fspath(path))
+    if path_text == os.path.abspath(os.fspath(ROOT / "index.html")):
+        return Path(path_text)
+    return inside_dir(DATA_DIR, Path(path_text))
 
 
 def safe_header_value(value: str, fallback: str = "application/octet-stream") -> str:
@@ -700,7 +696,7 @@ def run_job(job_id: str) -> None:
     try:
         job_dir = job_dir_for(job_id)
         result_path = job_result_path(job_id)
-        audio_path = checked_data_path(job_dir / safe_name(str(job.get("audio_name") or "audio")))
+        audio_path = checked_data_path(job_dir / "audio")
         sys.stderr.write(f"[run_job] {job_id} keys={len(job['keys'])}\n")
         sys.stderr.write(f"[run_job] {job_id} whisper={job['whisper_model']}, chat={job['chat_model']}\n")
         update_job(job_id, status="running", progress=2, message="任务开始...")
@@ -919,10 +915,9 @@ class Handler(BaseHTTPRequestHandler):
             with LOCK:
                 stale_ids = []
                 for j in JOBS.values():
-                    result_path = j.get("result_path")
                     finished = j.get("status") in ("done", "error")
-                    safe_result_path = path_in_data(str(result_path)) if result_path else None
-                    if finished and safe_result_path and not safe_result_path.is_file():
+                    result_path = job_result_path(j["id"]) if j.get("id") else None
+                    if finished and result_path and not result_path.is_file():
                         stale_ids.append(j["id"])
                         continue
                     items.append({
@@ -966,7 +961,7 @@ class Handler(BaseHTTPRequestHandler):
             items.sort(key=lambda x: x.get("created_at", 0), reverse=True)
             self.send_json(items)
             return
-        match = re.match(r"^/api/jobs/([A-Za-z0-9_-]+)(?:/(result|audio|download\.md|pause|resume))?$", self.path)
+        match = re.match(r"^/api/jobs/([0-9a-fA-F]{12})(?:/(result|audio|download\.md|pause|resume))?$", self.path)
         if match:
             job_id, action = match.groups()
             job_dir = job_dir_for(job_id)
@@ -996,14 +991,11 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": "job not found"}, 404)
                 return
             if action == "audio":
-                audio_name = job.get("audio_name")
-                audio_path = checked_data_path(job_dir / safe_name(str(audio_name or "")))
-                if not audio_path.is_file() and audio_name:
-                    audio_path = checked_data_path(job_dir / safe_name(str(audio_name)))
+                audio_path = checked_data_path(job_dir / "audio")
                 if not audio_path.is_file():
                     self.send_json({"error": "audio not found"}, 404)
                     return
-                self.send_file(audio_path, mimetypes.guess_type(audio_path.name)[0] or "application/octet-stream")
+                self.send_file(audio_path, "application/octet-stream")
                 return
             if action == "result":
                 result, _ = self.load_job_result(job_id, job)
@@ -1017,7 +1009,7 @@ class Handler(BaseHTTPRequestHandler):
                 body = markdown_result(result).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/markdown; charset=utf-8")
-                self.send_header("Content-Disposition", safe_header_value(f'attachment; filename="{safe_name(job_id)}.md"', "attachment; filename=\"recording.md\""))
+                self.send_header("Content-Disposition", "attachment; filename=\"recording.md\"")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
@@ -1055,7 +1047,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": str(exc)}, 500)
             return
 
-        review_match = re.match(r"^/api/jobs/([A-Za-z0-9_-]+)/review$", self.path)
+        review_match = re.match(r"^/api/jobs/([0-9a-fA-F]{12})/review$", self.path)
         if review_match:
             try:
                 job_id = clean_job_id(review_match.group(1))
@@ -1076,7 +1068,6 @@ class Handler(BaseHTTPRequestHandler):
                 result["review"] = review
                 result["structured_review"] = structured
                 result["chat_model"] = chat_model
-                result_path.parent.mkdir(parents=True, exist_ok=True)
                 write_json_file(result_path, result)
                 if job:
                     update_job(job_id, result=result, result_path=str(result_path))
@@ -1086,7 +1077,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": str(exc)}, 500)
             return
 
-        meta_match = re.match(r"^/api/jobs/([A-Za-z0-9_-]+)/meta$", self.path)
+        meta_match = re.match(r"^/api/jobs/([0-9a-fA-F]{12})/meta$", self.path)
         if meta_match:
             try:
                 job_id = clean_job_id(meta_match.group(1))
@@ -1099,7 +1090,6 @@ class Handler(BaseHTTPRequestHandler):
                 payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
                 result["display_name"] = str(payload.get("display_name") or "")[:200]
                 result["note"] = str(payload.get("note") or "")[:1000]
-                result_path.parent.mkdir(parents=True, exist_ok=True)
                 write_json_file(result_path, result)
                 if job:
                     update_job(job_id, result=result, result_path=str(result_path), display_name=result["display_name"], note=result["note"])
@@ -1109,7 +1099,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": str(exc)}, 500)
             return
 
-        annot_match = re.match(r"^/api/jobs/([A-Za-z0-9_-]+)/annotations$", self.path)
+        annot_match = re.match(r"^/api/jobs/([0-9a-fA-F]{12})/annotations$", self.path)
         if annot_match:
             try:
                 job_id = clean_job_id(annot_match.group(1))
@@ -1129,7 +1119,6 @@ class Handler(BaseHTTPRequestHandler):
                     "color": str(annotation.get("color") or ""),
                     "note": str(annotation.get("note") or ""),
                 }
-                result_path.parent.mkdir(parents=True, exist_ok=True)
                 write_json_file(result_path, result)
                 if job:
                     update_job(job_id, result=result, result_path=str(result_path))
@@ -1139,7 +1128,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": str(exc)}, 500)
             return
 
-        para_match = re.match(r"^/api/jobs/([A-Za-z0-9_-]+)/paragraphs$", self.path)
+        para_match = re.match(r"^/api/jobs/([0-9a-fA-F]{12})/paragraphs$", self.path)
         if para_match:
             try:
                 job_id = clean_job_id(para_match.group(1))
@@ -1156,7 +1145,6 @@ class Handler(BaseHTTPRequestHandler):
                 if not paragraph:
                     self.send_json({"error": "paragraph not found"}, 404)
                     return
-                result_path.parent.mkdir(parents=True, exist_ok=True)
                 write_json_file(result_path, result)
                 if job:
                     update_job(job_id, result=result, result_path=str(result_path))
@@ -1167,7 +1155,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         # pause / resume
-        pause_match = re.match(r"^/api/jobs/([A-Za-z0-9_-]+)/(pause|resume)$", self.path)
+        pause_match = re.match(r"^/api/jobs/([0-9a-fA-F]{12})/(pause|resume)$", self.path)
         if pause_match:
             job_id, action = pause_match.groups()
             job_id = clean_job_id(job_id)
@@ -1228,7 +1216,7 @@ class Handler(BaseHTTPRequestHandler):
             job_dir = job_dir_for(job_id)
             job_dir.mkdir(parents=True, exist_ok=True)
             audio_name = safe_name(audio.filename)
-            audio_path = checked_data_path(job_dir / audio_name)
+            audio_path = checked_data_path(job_dir / "audio")
             with audio_path.open("wb") as f:
                 shutil.copyfileobj(audio.file, f)
 
@@ -1269,7 +1257,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": True})
             return
 
-        review_match = re.match(r"^/api/jobs/([A-Za-z0-9_-]+)/review$", self.path)
+        review_match = re.match(r"^/api/jobs/([0-9a-fA-F]{12})/review$", self.path)
         if review_match:
             try:
                 job_id = clean_job_id(review_match.group(1))
@@ -1289,7 +1277,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": str(exc)}, 500)
             return
 
-        match = re.match(r"^/api/jobs/([A-Za-z0-9_-]+)$", self.path)
+        match = re.match(r"^/api/jobs/([0-9a-fA-F]{12})$", self.path)
         if not match:
             self.send_json({"error": "not found"}, 404)
             return
@@ -1297,8 +1285,7 @@ class Handler(BaseHTTPRequestHandler):
         with LOCK:
             JOBS.pop(job_id, None)
         job_dir = job_dir_for(job_id)
-        if job_dir.is_dir():
-            remove_data_tree(job_dir)
+        remove_data_tree(job_dir)
         sys.stderr.write(f"[do_DELETE] {job_id} deleted\n")
         self.send_json({"ok": True})
 
@@ -1359,13 +1346,13 @@ class Handler(BaseHTTPRequestHandler):
 
 def self_test() -> None:
     assert format_ts(83) == "00:01:23"
-    assert clean_job_id("abc_123-X") == "abc_123-X"
+    assert clean_job_id("ABCDEF123456") == "abcdef123456"
     try:
         clean_job_id("../bad")
         raise AssertionError("bad job id accepted")
     except ValueError:
         pass
-    assert job_dir_for("abc_123-X").name == "abc_123-X"
+    assert job_dir_for("abcdef123456").name == "abcdef123456"
     try:
         inside_dir(DATA_DIR, DATA_DIR / ".." / "server.py")
         raise AssertionError("escaped path accepted")
