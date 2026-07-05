@@ -2,7 +2,13 @@ $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 $log = Join-Path $PSScriptRoot "server.log"
 $pidFile = Join-Path $PSScriptRoot "server.pid"
+$vendorDir = Join-Path $PSScriptRoot "vendor"
 "starting $(Get-Date -Format s)" | Out-File -FilePath $log -Encoding utf8 -Append
+
+if (Test-Path $vendorDir) {
+  $env:PYTHONPATH = $vendorDir + ";" + $env:PYTHONPATH
+  Write-Host "Using bundled Python packages from vendor."
+}
 
 if (Test-Path $pidFile) {
   $oldPid = Get-Content $pidFile -ErrorAction SilentlyContinue
@@ -54,6 +60,11 @@ function Ensure-Ffmpeg() {
 function Ensure-Requirements($PythonCommand, [string[]]$PythonArgs = @()) {
   Write-Host "Using Python: $PythonCommand $($PythonArgs -join ' ')"
   & $PythonCommand @PythonArgs --version
+
+  if (Test-Path (Join-Path $vendorDir "groq")) {
+    Write-Host "Bundled dependencies found, skipping pip install."
+    return
+  }
 
   & $PythonCommand @PythonArgs -m pip --version *> $null
   if ($LASTEXITCODE -ne 0) {
