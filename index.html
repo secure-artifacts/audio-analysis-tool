@@ -1234,7 +1234,7 @@
           </div>
           <div class="form-group">
             <label>录音语言</label>
-            <select name="language" form="jobForm">
+            <select id="languageSelect" name="language" form="jobForm">
               <option value="fr">🇫🇷 法语（Français）</option>
               <option value="en">🇬🇧 英语（English）</option>
               <option value="pt">🇵🇹 葡萄牙语（Português）</option>
@@ -1397,7 +1397,7 @@
     const reviewDeleteBtn = document.getElementById("reviewDeleteBtn");
     const saveStatus = document.getElementById("saveStatus");
     const languageBadge = document.getElementById("languageBadge");
-    const languageSelect = form.elements.language;
+    const languageSelect = document.getElementById("languageSelect");
     let pollTimer = null;
     let currentJobId = null;
     let renderedParagraphs = 0;  // 已渲染的段落数
@@ -1443,7 +1443,8 @@
 
     function loadSavedLanguage() {
       const saved = localStorage.getItem(LANGUAGE_KEY);
-      if (saved && languageSelect?.querySelector(`option[value="${CSS.escape(saved)}"]`)) {
+      const values = [...(languageSelect?.options || [])].map(option => option.value);
+      if (saved && values.includes(saved)) {
         languageSelect.value = saved;
       }
     }
