@@ -1409,6 +1409,7 @@
     let saveStatusTimer = null;
     const RUBRIC_KEY = "audio_review_rubric_v3";
     const JOB_META_KEY = "recording_job_meta";
+    const LANGUAGE_KEY = "audio_recording_language";
     const rubricList = document.getElementById("rubricList");
     const rubricInput = document.getElementById("rubricInput");
     const addRubricBtn = document.getElementById("addRubricBtn");
@@ -1438,6 +1439,13 @@
 
     function updateLanguageBadge() {
       languageBadge.textContent = languageBadgeText(languageSelect?.value || "fr");
+    }
+
+    function loadSavedLanguage() {
+      const saved = localStorage.getItem(LANGUAGE_KEY);
+      if (saved && languageSelect?.querySelector(`option[value="${CSS.escape(saved)}"]`)) {
+        languageSelect.value = saved;
+      }
     }
 
     function applyLanguageLabels(result = {}, root = document) {
@@ -1638,8 +1646,12 @@
         }
       })
       .catch(() => {});
+    loadSavedLanguage();
     updateLanguageBadge();
-    languageSelect?.addEventListener("change", updateLanguageBadge);
+    languageSelect?.addEventListener("change", () => {
+      localStorage.setItem(LANGUAGE_KEY, languageSelect.value);
+      updateLanguageBadge();
+    });
     form.addEventListener("submit", syncRubricInput, true);
 
     // ═══ 音频范围滑杆 ═══
