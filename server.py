@@ -285,7 +285,7 @@ def run_ffmpeg(job_id: str, audio_path: Path, chunks_dir: Path) -> list[Path]:
         str(output_pattern),
     ]
     update_job(job_id, message="正在用 ffmpeg 切片音频...")
-    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
     if proc.returncode:
         raise RuntimeError("ffmpeg 切片失败：\n" + proc.stderr[-3000:])
     chunks = sorted(chunks_dir.glob("chunk_*.flac"))
