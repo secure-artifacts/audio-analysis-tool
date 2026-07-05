@@ -1037,6 +1037,34 @@
 	      color: var(--accent);
 	      box-shadow: 0 0 0 1px var(--accent);
 	    }
+    .copy-tools {
+      display: flex;
+      gap: 4px;
+      background: var(--bg);
+      border-radius: 8px;
+      padding: 3px;
+    }
+    .copy-tools button {
+      border: 0;
+      background: transparent;
+      color: var(--text-secondary);
+      border-radius: 6px;
+      padding: 5px 9px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .copy-tools button:hover,
+    .copy-tools button.active {
+      background: var(--card);
+      color: var(--accent);
+      box-shadow: 0 0 0 1px var(--accent);
+    }
+    td.copy-selected {
+      background: var(--accent-soft);
+      outline: 2px solid var(--accent);
+      outline-offset: -2px;
+    }
     .result-table-wrap.view-fr .zh,
     .result-table-wrap.view-fr .zh-col,
     .result-table-wrap.view-zh .fr,
@@ -1178,6 +1206,13 @@
 	                <button class="active" data-view="both" type="button">双栏</button>
 	                <button data-view="zh" type="button">中文</button>
 	                <button data-view="fr" type="button">法语</button>
+	              </div>
+	              <div class="copy-tools" data-copy-table="resultBody">
+	                <button data-copy="fr" type="button">复制原文</button>
+	                <button data-copy="zh" type="button">复制中文</button>
+	                <button data-copy="both" type="button">复制双语</button>
+	                <button data-copy="selected" type="button">复制选中</button>
+	                <button data-select-mode type="button">拖选</button>
 	              </div>
 	              <a id="downloadLink" class="btn-download" href="#">下载 .md</a>
 	            </div>
@@ -1321,6 +1356,13 @@
                   <button class="active" data-view="both" type="button">双栏</button>
                   <button data-view="zh" type="button">中文</button>
                   <button data-view="fr" type="button">法语</button>
+                </div>
+                <div class="copy-tools" data-copy-table="reviewResultBody">
+                  <button data-copy="fr" type="button">复制原文</button>
+                  <button data-copy="zh" type="button">复制中文</button>
+                  <button data-copy="both" type="button">复制双语</button>
+                  <button data-copy="selected" type="button">复制选中</button>
+                  <button data-select-mode type="button">拖选</button>
                 </div>
               </div>
               <div class="toolbar-group">
@@ -2748,6 +2790,107 @@
     });
 
     // 转录页的标注
+    function cellText(row, field) {
+      return (row.querySelector(`td.${field} .celltext`)?.textContent || "").trim();
+    }
+
+    function rowCopyText(row, mode) {
+      const fr = cellText(row, "fr");
+      const zh = cellText(row, "zh");
+      if (mode === "fr") return fr;
+      if (mode === "zh") return zh;
+      return [fr, zh].filter(Boolean).join("\n");
+    }
+
+    function selectedCopyText(tbody) {
+      return Array.from(tbody.querySelectorAll("tr")).map(row => {
+        const fields = ["fr", "zh"].filter(field => row.querySelector(`td.${field}.copy-selected`));
+        return fields.map(field => cellText(row, field)).filter(Boolean).join("\n");
+      }).filter(Boolean).join("\n\n");
+    }
+
+    function tableCopyText(tbody, mode) {
+      if (mode === "selected") return selectedCopyText(tbody);
+      return Array.from(tbody.querySelectorAll("tr")).map(row => rowCopyText(row, mode)).filter(Boolean).join("\n\n");
+    }
+
+    async function copyText(text) {
+      if (!text.trim()) throw new Error("nothing to copy");
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return;
+      }
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+    }
+
+    document.querySelectorAll(".copy-tools").forEach(tools => {
+      tools.addEventListener("click", async (e) => {
+        const tbody = document.getElementById(tools.dataset.copyTable);
+        if (!tbody) return;
+        const selectBtn = e.target.closest("[data-select-mode]");
+        if (selectBtn) {
+          tbody.dataset.copySelect = tbody.dataset.copySelect === "1" ? "0" : "1";
+          selectBtn.classList.toggle("active", tbody.dataset.copySelect === "1");
+          if (tbody.dataset.copySelect !== "1") tbody.querySelectorAll(".copy-selected").forEach(td => td.classList.remove("copy-selected"));
+          return;
+        }
+        const btn = e.target.closest("[data-copy]");
+        if (!btn) return;
+        try {
+          await copyText(tableCopyText(tbody, btn.dataset.copy));
+          const old = btn.textContent;
+          btn.textContent = "已复制";
+          setTimeout(() => { btn.textContent = old; }, 900);
+        } catch {
+          await showAlert("没有可复制的内容");
+        }
+      });
+    });
+
+    let copyDrag = null;
+    function copyCell(target) {
+      return target.closest("td.fr, td.zh");
+    }
+    function copyField(td) {
+      return td?.classList.contains("fr") ? "fr" : td?.classList.contains("zh") ? "zh" : "";
+    }
+    function selectCopyRange(tbody, a, b) {
+      const rows = Array.from(tbody.querySelectorAll("tr"));
+      const fields = ["fr", "zh"];
+      const aRow = rows.indexOf(a.closest("tr"));
+      const bRow = rows.indexOf(b.closest("tr"));
+      const aField = fields.indexOf(copyField(a));
+      const bField = fields.indexOf(copyField(b));
+      if (aRow < 0 || bRow < 0 || aField < 0 || bField < 0) return;
+      const [r1, r2] = [Math.min(aRow, bRow), Math.max(aRow, bRow)];
+      const [f1, f2] = [Math.min(aField, bField), Math.max(aField, bField)];
+      tbody.querySelectorAll(".copy-selected").forEach(td => td.classList.remove("copy-selected"));
+      rows.slice(r1, r2 + 1).forEach(row => {
+        fields.slice(f1, f2 + 1).forEach(field => row.querySelector(`td.${field}`)?.classList.add("copy-selected"));
+      });
+    }
+    document.addEventListener("mousedown", (e) => {
+      const td = copyCell(e.target);
+      const tbody = td?.closest("tbody");
+      if (!td || tbody?.dataset.copySelect !== "1") return;
+      e.preventDefault();
+      copyDrag = { tbody, start: td };
+      selectCopyRange(tbody, td, td);
+    });
+    document.addEventListener("mouseover", (e) => {
+      if (!copyDrag) return;
+      const td = copyCell(e.target);
+      if (td && td.closest("tbody") === copyDrag.tbody) selectCopyRange(copyDrag.tbody, copyDrag.start, td);
+    });
+    document.addEventListener("mouseup", () => { copyDrag = null; });
+
     resultBody.addEventListener("change", (e) => saveParagraphEdit(e));
     resultBody.addEventListener("blur", (e) => saveParagraphEdit(e), true);
 
