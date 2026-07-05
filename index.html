@@ -102,6 +102,16 @@
       color: var(--accent);
       box-shadow: var(--shadow-sm);
     }
+    .language-badge {
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-weight: 700;
+      padding: 6px 10px;
+      border: 1px solid var(--card-border);
+      border-radius: 999px;
+      background: var(--card);
+      white-space: nowrap;
+    }
 
     /* ═══ Layout ═══ */
     main {
@@ -1086,6 +1096,7 @@
   <header>
     <h1>录音分析工具</h1>
     <div style="display:flex;align-items:center;gap:8px">
+      <span id="languageBadge" class="language-badge"></span>
       <span id="saveStatus" class="save-status" hidden></span>
       <nav class="tabs" aria-label="页面">
         <button class="tab active" data-tab="transcribe">转录</button>
@@ -1226,6 +1237,9 @@
             <select name="language" form="jobForm">
               <option value="fr">🇫🇷 法语（Français）</option>
               <option value="en">🇬🇧 英语（English）</option>
+              <option value="pt">🇵🇹 葡萄牙语（Português）</option>
+              <option value="ar">🇸🇦 阿拉伯语（العربية）</option>
+              <option value="mg">🇲🇬 马尔加什语（Malagasy）</option>
             </select>
           </div>
           <div class="form-group">
@@ -1293,6 +1307,8 @@
                 <select id="reviewCriterionSelect" class="review-criterion-select" title="评价总结">
                   <option value="">评价总结：全部标准</option>
                 </select>
+                <button id="reviewAnalyzeBtn" class="btn-sm" type="button">分析</button>
+                <button id="reviewDeleteBtn" class="btn-sm" type="button" title="删除评价">×</button>
               </div>
               <div class="toolbar-group table-tools">
                 <div class="review-filters" id="reviewFilters">
@@ -1377,7 +1393,11 @@
     const summaryNotes = document.getElementById("summaryNotes");
     const reviewFilters = document.getElementById("reviewFilters");
     const reviewCriterionSelect = document.getElementById("reviewCriterionSelect");
+    const reviewAnalyzeBtn = document.getElementById("reviewAnalyzeBtn");
+    const reviewDeleteBtn = document.getElementById("reviewDeleteBtn");
     const saveStatus = document.getElementById("saveStatus");
+    const languageBadge = document.getElementById("languageBadge");
+    const languageSelect = form.elements.language;
     let pollTimer = null;
     let currentJobId = null;
     let renderedParagraphs = 0;  // 已渲染的段落数
@@ -1388,7 +1408,7 @@
     let pendingSaves = 0;
     let saveStatusTimer = null;
     const RUBRIC_KEY = "audio_review_rubric_v3";
-    const JOB_META_KEY = "sermon_job_meta";
+    const JOB_META_KEY = "recording_job_meta";
     const rubricList = document.getElementById("rubricList");
     const rubricInput = document.getElementById("rubricInput");
     const addRubricBtn = document.getElementById("addRubricBtn");
@@ -1398,11 +1418,26 @@
     let rubric = loadRubric();
 
     function sourceLabels(result = {}) {
-      const isEnglish = result.language === "en";
-      return {
-        pair: isEnglish ? "英中对照" : "法中对照",
-        source: isEnglish ? "英语" : "法语",
-      };
+      return ({
+        en: { pair: "英中对照", source: "英语" },
+        pt: { pair: "葡中对照", source: "葡萄牙语" },
+        ar: { pair: "阿中对照", source: "阿拉伯语" },
+        mg: { pair: "马中对照", source: "马尔加什语" },
+      })[result.language] || { pair: "法中对照", source: "法语" };
+    }
+
+    function languageBadgeText(language) {
+      return ({
+        fr: "🇫🇷 法语",
+        en: "🇬🇧 英语",
+        pt: "🇵🇹 葡萄牙语",
+        ar: "🇸🇦 阿拉伯语",
+        mg: "🇲🇬 马尔加什语",
+      })[language] || "🇫🇷 法语";
+    }
+
+    function updateLanguageBadge() {
+      languageBadge.textContent = languageBadgeText(languageSelect?.value || "fr");
     }
 
     function applyLanguageLabels(result = {}, root = document) {
@@ -1503,6 +1538,18 @@
       );
     }
 
+    async function saveRubricServer() {
+      try {
+        await fetch("/api/rubric", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rubric }),
+        });
+      } catch (e) {
+        console.warn("评价标准仅保存到浏览器本地", e);
+      }
+    }
+
     function renderRubric() {
       rubricList.innerHTML = rubric.length ? rubric.map((item, i) => `
         <div class="rubric-row" data-i="${i}">
@@ -1522,6 +1569,7 @@
       rubric[Number(row.dataset.i)].detail = row.querySelector(".rubric-detail").value;
       rubric[Number(row.dataset.i)].enabled = row.querySelector("input").checked;
       syncRubricInput();
+      saveRubricServer();
     }
 
     rubricList.addEventListener("input", (e) => {
@@ -1538,11 +1586,13 @@
       if (!btn) return;
       rubric.splice(Number(btn.closest(".rubric-row").dataset.i), 1);
       renderRubric();
+      saveRubricServer();
     });
 
     addRubricBtn.addEventListener("click", () => {
       rubric.push({ title: "", detail: "", enabled: true });
       renderRubric();
+      saveRubricServer();
       rubricList.lastElementChild?.querySelector(".rubric-title")?.focus();
     });
 
@@ -1567,12 +1617,29 @@
         if (!Array.isArray(data)) throw new Error("文件格式不是评价标准列表");
         rubric = data.map(normalizeRubricItem).filter(x => isRealTitle(x.title) || x.detail);
         renderRubric();
+        saveRubricServer();
       } catch(e) {
         await showAlert(e.message || "导入失败");
       }
     });
 
     renderRubric();
+    fetch("/api/rubric")
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        const serverRubric = Array.isArray(data?.rubric)
+          ? data.rubric.map(normalizeRubricItem).filter(x => isRealTitle(x.title) || x.detail)
+          : [];
+        if (serverRubric.length) {
+          rubric = serverRubric;
+          renderRubric();
+        } else if (rubric.length) {
+          saveRubricServer();
+        }
+      })
+      .catch(() => {});
+    updateLanguageBadge();
+    languageSelect?.addEventListener("change", updateLanguageBadge);
     form.addEventListener("submit", syncRubricInput, true);
 
     // ═══ 音频范围滑杆 ═══
@@ -2234,7 +2301,7 @@
 
     function renderReview(result) {
       const structured = renderStructuredReview(result.structured_review, reviewCriterionSelect?.value || "");
-      return structured || renderReviewText(result.review || "");
+      return structured || renderReviewText(result.review || "") || '<div class="empty" style="padding:40px 0">暂无评价。可以点击“分析”生成当前录音的评价。</div>';
     }
 
     function refreshReviewText() {
@@ -2259,6 +2326,53 @@
     }
 
     reviewCriterionSelect.addEventListener("change", refreshReviewText);
+    reviewAnalyzeBtn.addEventListener("click", async () => {
+      if (!currentReviewJobId || !currentReviewResult) return;
+      const apiKeys = keysTextarea?.dataset.full || keysTextarea?.value || "";
+      if (!apiKeys.trim() || apiKeys.includes("***")) {
+        await showAlert("请先在设置页输入或显示 Groq API Key。");
+        return;
+      }
+      const selected = reviewCriterionSelect.value;
+      const selectedRubric = rubric
+        .filter(x => x.enabled && (isRealTitle(x.title) || x.detail))
+        .filter(x => !selected || sameCriterion(criterionTitle(x), selected));
+      reviewAnalyzeBtn.disabled = true;
+      reviewAnalyzeBtn.textContent = "分析中...";
+      try {
+        const resp = await fetch(`/api/jobs/${currentReviewJobId}/review`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            api_keys: apiKeys,
+            chat_model: form.elements.chat_model.value,
+            rubric: selectedRubric,
+          }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || "分析失败");
+        currentReviewResult = data.result;
+        refreshReviewText();
+        reviewResultHeader.hidden = false;
+      } catch (e) {
+        await showAlert(e.message || "分析失败");
+      } finally {
+        reviewAnalyzeBtn.disabled = false;
+        reviewAnalyzeBtn.textContent = "分析";
+      }
+    });
+    reviewDeleteBtn.addEventListener("click", async () => {
+      if (!currentReviewJobId || !currentReviewResult) return;
+      if (!await showConfirm("确定删除当前评价？\n转录和音频会保留。")) return;
+      const resp = await fetch(`/api/jobs/${currentReviewJobId}/review`, { method: "DELETE" });
+      if (!resp.ok) {
+        await showAlert("删除评价失败");
+        return;
+      }
+      currentReviewResult.review = "";
+      currentReviewResult.structured_review = {};
+      refreshReviewText();
+    });
     reviewModeTabs.addEventListener("click", (e) => {
       const btn = e.target.closest("[data-review-mode]");
       if (btn) setReviewMode(btn.dataset.reviewMode);
@@ -2779,11 +2893,9 @@
               currentReviewJobId = id;
               applyLanguageLabels(result);
               populateReviewCriterionSelect(result);
-              if (result.review || result.structured_review) {
-                reviewText.innerHTML = renderReview(result);
-                reviewText.dataset.available = "1";
-                reviewResultHeader.hidden = false;
-              }
+              reviewText.innerHTML = renderReview(result);
+              reviewText.dataset.available = "1";
+              reviewResultHeader.hidden = false;
               if (result.paragraphs && result.paragraphs.length) {
                 reviewDownloadLink.href = `/api/jobs/${id}/download.md`;
 		                reviewResultHeader.hidden = false;

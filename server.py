@@ -5,11 +5,14 @@ import mimetypes
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import threading
 import time
+import traceback
 import uuid
+import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 from pathlib import Path
@@ -30,9 +33,40 @@ except ModuleNotFoundError:
 
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
+LOG_PATH = ROOT / "server.log"
+RUBRIC_PATH = ROOT / "rubric.json"
+PID_PATH = ROOT / "server.pid"
+LOG_LOCK = threading.Lock()
 SEGMENT_SECONDS = 8 * 60
 WHISPER_MODELS = {"whisper-large-v3-turbo", "whisper-large-v3"}
 DEFAULT_CHAT_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+JOB_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
+LANGUAGE_NAMES = {
+    "fr": "法语",
+    "en": "英语",
+    "pt": "葡萄牙语",
+    "ar": "阿拉伯语",
+    "mg": "马尔加什语",
+}
+PAIR_TITLES = {
+    "fr": "法中对照",
+    "en": "英中对照",
+    "pt": "葡中对照",
+    "ar": "阿中对照",
+    "mg": "马中对照",
+}
+
+
+def write_log(message: str) -> None:
+    line = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}"
+    sys.stderr.write(line + "\n")
+    with LOG_LOCK:
+        with LOG_PATH.open("a", encoding="utf-8") as f:
+            f.write(line + "\n")
+
+
+def write_exception(message: str) -> None:
+    write_log(message + "\n" + traceback.format_exc())
 
 
 class FormField:
@@ -105,6 +139,27 @@ def clean_keys(text: str) -> list[str]:
 def safe_name(name: str) -> str:
     name = Path(name or "audio").name
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", name)[:120] or "audio"
+
+
+def clean_job_id(job_id: str) -> str:
+    job_id = str(job_id or "")
+    if not JOB_ID_RE.fullmatch(job_id):
+        raise ValueError("invalid job id")
+    return job_id
+
+
+def job_dir_for(job_id: str) -> Path:
+    path = (DATA_DIR / clean_job_id(job_id)).resolve()
+    data_root = DATA_DIR.resolve()
+    if os.path.commonpath([str(data_root), str(path)]) != str(data_root):
+        raise ValueError("invalid job path")
+    return path
+
+
+def path_in_data(value: str | Path) -> Path | None:
+    path = Path(str(value)).resolve()
+    data_root = DATA_DIR.resolve()
+    return path if os.path.commonpath([str(data_root), str(path)]) == str(data_root) else None
 
 
 def format_ts(seconds: float) -> str:
@@ -199,7 +254,7 @@ def _call_groq(
     """Call Groq with key rotation and basic retry handling."""
     failed_keys: set[str] = set()
     total_keys = len(key_pool.keys)
-    log = lambda msg: sys.stderr.write(f"[_call_groq] {msg}\n")
+    log = lambda msg: write_log(f"[_call_groq] {msg}")
 
     while len(failed_keys) < total_keys:
         if Groq is None:
@@ -245,6 +300,9 @@ def _call_groq(
                 continue
             log(f"{label} - key {masked} unrecoverable error {status}")
             raise RuntimeError(f"Groq {label} HTTP {status}: {resp_body}") from exc
+        except Exception:
+            write_exception(f"Groq {label} unexpected error with key {masked}")
+            raise
 
     log(f"{label} - all {total_keys} key(s) rejected")
     raise RuntimeError(f"Groq {label} failed: all {total_keys} key(s) returned 403")
@@ -268,6 +326,9 @@ def transcribe_chunk(job_id: str, key_pool: KeyPool, path: Path, model: str, lan
     prompts = {
         "fr": "Transcription audio en français. Conserver les noms propres et le style oral.",
         "en": "Transcription of an English audio recording. Keep proper names and oral style.",
+        "pt": "Transcrição de áudio em português. Manter nomes próprios e estilo oral.",
+        "ar": "تفريغ تسجيل صوتي باللغة العربية. حافظ على الأسماء والأسلوب الشفهي.",
+        "mg": "Fandikana lahateny am-peo amin'ny teny malagasy. Tazomy ny anarana manokana sy ny fomba fiteny am-bava.",
     }
     prompt = prompts.get(language, prompts["en"])
 
@@ -276,7 +337,7 @@ def transcribe_chunk(job_id: str, key_pool: KeyPool, path: Path, model: str, lan
             return client.audio.transcriptions.create(
                 file=f,
                 model=model,
-                language=language if language in ("fr", "en") else "en",
+                language=language if language in LANGUAGE_NAMES else "en",
                 response_format="verbose_json",
                 temperature=0,
                 timestamp_granularities=["segment"],
@@ -405,6 +466,10 @@ def structured_review_markdown(review: dict) -> str:
     return "\n".join(lines).strip()
 
 
+def is_review_object(value: dict) -> bool:
+    return isinstance(value, dict) and any(k in value for k in ("overall", "strengths", "issues", "focus"))
+
+
 def patch_paragraph(result: dict, para_id: str, patch: dict) -> dict | None:
     paragraph = next(
         (
@@ -427,7 +492,7 @@ def polish_and_translate(job_id: str, key_pool: KeyPool, paragraphs: list[dict],
     out: list[dict] = []
     batch_size = 12
     batches = [paragraphs[i : i + batch_size] for i in range(0, len(paragraphs), batch_size)]
-    lang_name = {"fr": "法语", "en": "英语"}.get(language, "法语")
+    lang_name = LANGUAGE_NAMES.get(language, "法语")
     system = (
         f"你是{lang_name}录音转写整理助手。只修正明显口误、错词和不通顺处，不能扩写、删减或改变原意。"
         f"把{lang_name}整理成自然段，并翻译成自然中文。必须保留每段 id、timestamp、speaker。"
@@ -464,6 +529,7 @@ def polish_and_translate(job_id: str, key_pool: KeyPool, paragraphs: list[dict],
             data = extract_json_object(chat_content(groq_json_request(job_id, key_pool, payload)))
             returned = data.get("paragraphs", [])
         except Exception:
+            write_exception(f"polish/translate batch {i}/{len(batches)} failed to parse or request")
             returned = []
 
         by_id = {int(p.get("id", 0)): p for p in returned if str(p.get("id", "")).isdigit()}
@@ -499,12 +565,13 @@ def polish_and_translate(job_id: str, key_pool: KeyPool, paragraphs: list[dict],
                 for p in missing:
                     p["zh"] = zh_by_id.get(p["id"], p.get("zh", ""))
             except Exception:
+                write_exception(f"retry missing zh failed for {len(missing)} paragraph(s)")
                 pass
         out.extend(translated_batch)
     return out
 
 
-def evaluate_sermon(
+def evaluate_recording(
     job_id: str,
     key_pool: KeyPool,
     paragraphs: list[dict],
@@ -515,7 +582,7 @@ def evaluate_sermon(
     if not paragraphs:
         return "", {}
     duration = max((p.get("end", 0) for p in paragraphs), default=0)
-    words = sum(len(re.findall(r"[A-Za-z脌-每']+", p.get("fr", p.get("fr_raw", "")))) for p in paragraphs)
+    words = sum(len((p.get("fr") or p.get("fr_raw") or "").split()) for p in paragraphs)
     wpm = round(words / max(duration / 60, 1))
     transcript = "\n".join(
         f"[{p['timestamp']}] {p.get('speaker', '发言人')} FR: {p.get('fr') or p.get('fr_raw', '')} ZH: {p.get('zh', '')}"
@@ -531,6 +598,7 @@ def evaluate_sermon(
     system = (
         "你是录音内容分析助手。请用中文评价这段录音，必须具体、温和、准确。"
         "指出优点和问题时尽量带 00:00:00 格式时间点。不要编造音频中没有的内容。"
+        "不要复述输入内容，不要返回统计、参考稿、实际录音转录或评价要求。"
         "只返回 JSON，不要 Markdown，不要代码块。"
     )
     review_format = {
@@ -563,10 +631,13 @@ def evaluate_sermon(
     content = chat_content(groq_json_request(job_id, key_pool, payload)).strip()
     try:
         structured = extract_json_object(content)
+        if not is_review_object(structured):
+            raise ValueError("model returned non-review JSON")
         markdown = structured_review_markdown(structured)
-        return markdown or content, structured
-    except Exception:
-        return content, {}
+        return markdown or "暂无评价", structured
+    except Exception as exc:
+        write_log(f"review response invalid: {exc}; first 2000 chars: {content[:2000]}")
+        return f"评价生成失败：模型没有返回有效评价。请换一个整理/翻译模型后再点“分析”。", {}
 
 
 def run_job(job_id: str) -> None:
@@ -686,7 +757,12 @@ def run_job(job_id: str) -> None:
         structured_review = {}
         if job.get("make_review"):
             update_job(job_id, progress=90, message="正在生成录音评价...")
-            review, structured_review = evaluate_sermon(job_id, key_pool, all_paragraphs, job["chat_model"], job.get("script", ""), job.get("rubric"))
+            try:
+                review, structured_review = evaluate_recording(job_id, key_pool, all_paragraphs, job["chat_model"], job.get("script", ""), job.get("rubric"))
+            except Exception as exc:
+                review = f"评价生成失败：{exc}\n\n转录和翻译已完成。可以稍后更换模型或 Key 后重新转录并生成评价。"
+                structured_review = {}
+                write_exception(f"review failed for {job_id}: {exc}")
 
         result = {
             "id": job_id,
@@ -706,6 +782,7 @@ def run_job(job_id: str) -> None:
         result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
         update_job(job_id, status="done", progress=100, message="完成", result_path=str(result_path), result=result)
     except Exception as exc:
+        write_exception(f"job {job_id} failed: {exc}")
         update_job(job_id, status="error", message=str(exc), error=str(exc), progress=100)
 
 
@@ -728,7 +805,7 @@ def markdown_result(result: dict) -> str:
             else:
                 lines.append(f"- {item}")
         lines.append("")
-    lines.extend(["## 英中对照" if result.get("language") == "en" else "## 法中对照", ""])
+    lines.extend([f"## {PAIR_TITLES.get(result.get('language'), '法中对照')}", ""])
     for p in result.get("paragraphs", []):
         para_id = str(p.get("id") or p.get("timestamp") or "")
         annotation = annotations.get(para_id) or {}
@@ -759,7 +836,11 @@ def markdown_result(result: dict) -> str:
 
 class Handler(BaseHTTPRequestHandler):
     def load_job_result(self, job_id: str, job: dict | None = None) -> tuple[dict | None, Path]:
-        result_path = Path((job or {}).get("result_path") or DATA_DIR / job_id / "result.json")
+        result_path = job_dir_for(job_id) / "result.json"
+        if (job or {}).get("result_path"):
+            candidate = path_in_data(str((job or {}).get("result_path")))
+            if candidate:
+                result_path = candidate
         result = (job or {}).get("result")
         if not result and result_path.is_file():
             result = json.loads(result_path.read_text(encoding="utf-8-sig"))
@@ -773,6 +854,12 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(204)
             self.end_headers()
             return
+        if self.path == "/api/rubric":
+            rubric = []
+            if RUBRIC_PATH.is_file():
+                rubric = json.loads(RUBRIC_PATH.read_text(encoding="utf-8-sig"))
+            self.send_json({"rubric": rubric if isinstance(rubric, list) else []})
+            return
         if self.path == "/api/jobs":
             # Return in-memory jobs plus completed jobs saved under data/.
             items = []
@@ -782,7 +869,8 @@ class Handler(BaseHTTPRequestHandler):
                 for j in JOBS.values():
                     result_path = j.get("result_path")
                     finished = j.get("status") in ("done", "error")
-                    if finished and result_path and not Path(str(result_path)).is_file():
+                    safe_result_path = path_in_data(str(result_path)) if result_path else None
+                    if finished and safe_result_path and not safe_result_path.is_file():
                         stale_ids.append(j["id"])
                         continue
                     items.append({
@@ -802,6 +890,10 @@ class Handler(BaseHTTPRequestHandler):
             if DATA_DIR.is_dir():
                 for d in sorted(DATA_DIR.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)[:50]:
                     if d.is_dir() and d.name not in seen_ids:
+                        try:
+                            clean_job_id(d.name)
+                        except ValueError:
+                            continue
                         result_file = d / "result.json"
                         if result_file.is_file():
                             try:
@@ -824,10 +916,11 @@ class Handler(BaseHTTPRequestHandler):
         match = re.match(r"^/api/jobs/([A-Za-z0-9_-]+)(?:/(result|audio|download\.md|pause|resume))?$", self.path)
         if match:
             job_id, action = match.groups()
+            job_dir = job_dir_for(job_id)
             job = get_job(job_id)
             if not job:
                 # Try restoring a completed job from data/.
-                result_file = DATA_DIR / job_id / "result.json"
+                result_file = job_dir / "result.json"
                 if result_file.is_file():
                     try:
                         r = json.loads(result_file.read_text(encoding="utf-8"))
@@ -850,9 +943,13 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if action == "audio":
                 audio_name = job.get("audio_name")
-                audio_path = Path(job.get("audio_path") or DATA_DIR / job_id / str(audio_name or ""))
+                audio_path = job_dir / safe_name(str(audio_name or ""))
+                if job.get("audio_path"):
+                    candidate = path_in_data(str(job.get("audio_path")))
+                    if candidate:
+                        audio_path = candidate
                 if not audio_path.is_file() and audio_name:
-                    audio_path = DATA_DIR / job_id / audio_name
+                    audio_path = job_dir / safe_name(str(audio_name))
                 if not audio_path.is_file():
                     self.send_json({"error": "audio not found"}, 404)
                     return
@@ -870,7 +967,7 @@ class Handler(BaseHTTPRequestHandler):
                 body = markdown_result(result).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/markdown; charset=utf-8")
-                self.send_header("Content-Disposition", f'attachment; filename="{job_id}.md"')
+                self.send_header("Content-Disposition", f'attachment; filename="{safe_name(job_id)}.md"')
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
@@ -889,6 +986,56 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json({"error": "not found"}, 404)
 
     def do_POST(self) -> None:
+        if self.path == "/api/rubric":
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+                rubric = []
+                for item in payload.get("rubric") or []:
+                    if not isinstance(item, dict):
+                        continue
+                    title = str(item.get("title") or "").strip()
+                    detail = str(item.get("detail") or "").strip()
+                    if title or detail:
+                        rubric.append({"title": title[:80], "detail": detail[:1000], "enabled": item.get("enabled") is not False})
+                RUBRIC_PATH.write_text(json.dumps(rubric, ensure_ascii=False, indent=2), encoding="utf-8")
+                self.send_json({"ok": True})
+            except Exception as exc:
+                write_exception(f"save rubric failed: {exc}")
+                self.send_json({"error": str(exc)}, 500)
+            return
+
+        review_match = re.match(r"^/api/jobs/([A-Za-z0-9_-]+)/review$", self.path)
+        if review_match:
+            try:
+                job_id = clean_job_id(review_match.group(1))
+                job = get_job(job_id)
+                result, result_path = self.load_job_result(job_id, job)
+                if not result:
+                    self.send_json({"error": "result not ready"}, 409)
+                    return
+                length = int(self.headers.get("Content-Length", "0"))
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+                keys = clean_keys(str(payload.get("api_keys") or ""))
+                if not keys:
+                    self.send_json({"error": "请输入至少一个 Groq API Key"}, 400)
+                    return
+                chat_model = str(payload.get("chat_model") or result.get("chat_model") or DEFAULT_CHAT_MODEL).strip() or DEFAULT_CHAT_MODEL
+                rubric = parse_rubric_json(json.dumps(payload.get("rubric") or [], ensure_ascii=False))
+                review, structured = evaluate_recording(job_id, KeyPool(keys, job_id), result.get("paragraphs", []), chat_model, result.get("script", ""), rubric)
+                result["review"] = review
+                result["structured_review"] = structured
+                result["chat_model"] = chat_model
+                result_path.parent.mkdir(parents=True, exist_ok=True)
+                result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+                if job:
+                    update_job(job_id, result=result, result_path=str(result_path))
+                self.send_json({"ok": True, "result": result})
+            except Exception as exc:
+                write_exception(f"generate review failed: {exc}")
+                self.send_json({"error": str(exc)}, 500)
+            return
+
         meta_match = re.match(r"^/api/jobs/([A-Za-z0-9_-]+)/meta$", self.path)
         if meta_match:
             try:
@@ -908,6 +1055,7 @@ class Handler(BaseHTTPRequestHandler):
                     update_job(job_id, result=result, result_path=str(result_path), display_name=result["display_name"], note=result["note"])
                 self.send_json({"ok": True, "display_name": result["display_name"], "note": result["note"]})
             except Exception as exc:
+                write_exception(f"save meta failed: {exc}")
                 self.send_json({"error": str(exc)}, 500)
             return
 
@@ -937,6 +1085,7 @@ class Handler(BaseHTTPRequestHandler):
                     update_job(job_id, result=result, result_path=str(result_path))
                 self.send_json({"ok": True})
             except Exception as exc:
+                write_exception(f"save annotation failed: {exc}")
                 self.send_json({"error": str(exc)}, 500)
             return
 
@@ -963,6 +1112,7 @@ class Handler(BaseHTTPRequestHandler):
                     update_job(job_id, result=result, result_path=str(result_path))
                 self.send_json({"ok": True, "paragraph": paragraph})
             except Exception as exc:
+                write_exception(f"patch paragraph failed: {exc}")
                 self.send_json({"error": str(exc)}, 500)
             return
 
@@ -976,11 +1126,11 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if action == "pause":
                 update_job(job_id, paused=True, status="paused", message="已暂停")
-                sys.stderr.write(f"[do_POST] {job_id} paused\n")
+                write_log(f"[do_POST] {job_id} paused")
                 self.send_json({"status": "paused"})
             else:  # resume
                 update_job(job_id, paused=False, status="running", message="继续中...")
-                sys.stderr.write(f"[do_POST] {job_id} resumed\n")
+                write_log(f"[do_POST] {job_id} resumed")
                 self.send_json({"status": "running"})
             return
 
@@ -1018,14 +1168,14 @@ class Handler(BaseHTTPRequestHandler):
             range_end = parse_range(form.get("range_end", FormField("")).value)
 
             masked = [k[:8] + "..." + k[-4:] if len(k) > 16 else k[:4] + "..." for k in keys]
-            sys.stderr.write(f"[do_POST] parsed {len(keys)} key(s): {masked}\n")
-            sys.stderr.write(f"[do_POST] whisper={whisper_model}, chat={chat_model}")
+            write_log(f"[do_POST] parsed {len(keys)} key(s): {masked}")
+            msg = f"[do_POST] whisper={whisper_model}, chat={chat_model}"
             if range_start is not None or range_end is not None:
-                sys.stderr.write(f", range=[{range_start or 0}..{range_end or 'end'}]s")
-            sys.stderr.write("\n")
+                msg += f", range=[{range_start or 0}..{range_end or 'end'}]s"
+            write_log(msg)
 
-            job_id = uuid.uuid4().hex[:12]
-            job_dir = DATA_DIR / job_id
+            job_id = clean_job_id(uuid.uuid4().hex[:12])
+            job_dir = job_dir_for(job_id)
             job_dir.mkdir(parents=True, exist_ok=True)
             audio_name = safe_name(audio.filename)
             audio_path = job_dir / audio_name
@@ -1057,6 +1207,7 @@ class Handler(BaseHTTPRequestHandler):
             threading.Thread(target=run_job, args=(job_id,), daemon=True).start()
             self.send_json({"id": job_id})
         except Exception as exc:
+            write_exception(f"create job failed: {exc}")
             self.send_json({"error": str(exc)}, 500)
 
     def do_DELETE(self) -> None:
@@ -1068,56 +1219,79 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": True})
             return
 
+        review_match = re.match(r"^/api/jobs/([A-Za-z0-9_-]+)/review$", self.path)
+        if review_match:
+            try:
+                job_id = clean_job_id(review_match.group(1))
+                job = get_job(job_id)
+                result, result_path = self.load_job_result(job_id, job)
+                if not result:
+                    self.send_json({"error": "result not ready"}, 409)
+                    return
+                result["review"] = ""
+                result["structured_review"] = {}
+                result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+                if job:
+                    update_job(job_id, result=result, result_path=str(result_path))
+                self.send_json({"ok": True})
+            except Exception as exc:
+                write_exception(f"delete review failed: {exc}")
+                self.send_json({"error": str(exc)}, 500)
+            return
+
         match = re.match(r"^/api/jobs/([A-Za-z0-9_-]+)$", self.path)
         if not match:
             self.send_json({"error": "not found"}, 404)
             return
-        job_id = match.group(1)
+        job_id = clean_job_id(match.group(1))
         with LOCK:
             JOBS.pop(job_id, None)
-        job_dir = DATA_DIR / job_id
+        job_dir = job_dir_for(job_id)
         if job_dir.is_dir():
             shutil.rmtree(str(job_dir))
         sys.stderr.write(f"[do_DELETE] {job_id} deleted\n")
         self.send_json({"ok": True})
 
     def send_file(self, path: Path, content_type: str) -> None:
-        size = path.stat().st_size
-        start, end = 0, size - 1
-        status = 200
-        range_header = self.headers.get("Range", "")
-        match = re.match(r"bytes=(\d*)-(\d*)", range_header)
-        if match:
-            left, right = match.groups()
-            if left:
-                start = int(left)
-                end = int(right) if right else end
-            elif right:
-                start = max(0, size - int(right))
-            if start >= size or end < start:
-                self.send_response(416)
-                self.send_header("Content-Range", f"bytes */{size}")
-                self.end_headers()
-                return
-            end = min(end, size - 1)
-            status = 206
-        length = end - start + 1
-        self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Accept-Ranges", "bytes")
-        if status == 206:
-            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
-        self.send_header("Content-Length", str(length))
-        self.end_headers()
-        with path.open("rb") as f:
-            f.seek(start)
-            remaining = length
-            while remaining > 0:
-                chunk = f.read(min(1024 * 1024, remaining))
-                if not chunk:
-                    break
-                self.wfile.write(chunk)
-                remaining -= len(chunk)
+        try:
+            size = path.stat().st_size
+            start, end = 0, size - 1
+            status = 200
+            range_header = self.headers.get("Range", "")
+            match = re.match(r"bytes=(\d*)-(\d*)", range_header)
+            if match:
+                left, right = match.groups()
+                if left:
+                    start = int(left)
+                    end = int(right) if right else end
+                elif right:
+                    start = max(0, size - int(right))
+                if start >= size or end < start:
+                    self.send_response(416)
+                    self.send_header("Content-Range", f"bytes */{size}")
+                    self.end_headers()
+                    return
+                end = min(end, size - 1)
+                status = 206
+            length = end - start + 1
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Accept-Ranges", "bytes")
+            if status == 206:
+                self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+            self.send_header("Content-Length", str(length))
+            self.end_headers()
+            with path.open("rb") as f:
+                f.seek(start)
+                remaining = length
+                while remaining > 0:
+                    chunk = f.read(min(1024 * 1024, remaining))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+        except ConnectionError:
+            write_log(f"client disconnected while sending {safe_name(path.name)}")
 
     def send_json(self, data: dict, status: int = 200) -> None:
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -1128,11 +1302,17 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def log_message(self, fmt: str, *args: object) -> None:
-        sys.stderr.write("[%s] %s\n" % (self.log_date_time_string(), fmt % args))
+        write_log(fmt % args)
 
 
 def self_test() -> None:
     assert format_ts(83) == "00:01:23"
+    assert clean_job_id("abc_123-X") == "abc_123-X"
+    try:
+        clean_job_id("../bad")
+        raise AssertionError("bad job id accepted")
+    except ValueError:
+        pass
     assert parse_rubric_json('["表达清晰"]')[0]["title"] == "表达清晰"
     assert parse_rubric_json('[{"title":"表达清晰","detail":"是否清楚"}]')[0]["detail"] == "是否清楚"
     assert parse_rubric_json('["None"]') == []
@@ -1149,6 +1329,8 @@ def self_test() -> None:
     )
     assert len(paras) == 3
     assert extract_json_object('```json\n{"ok": true}\n```')["ok"] is True
+    assert not is_review_object({"统计": {}, "实际录音转录": "x"})
+    assert is_review_object({"overall": "ok"})
     rendered = markdown_result({
         "audio_name": "demo.mp3",
         "paragraphs": [{"id": 1, "timestamp": "00:00:01", "speaker": "发言人", "fr": "Bonjour", "zh": "你好"}],
@@ -1164,9 +1346,34 @@ def main() -> None:
     DATA_DIR.mkdir(exist_ok=True)
     port = int(os.environ.get("PORT", "8765"))
     httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-    print(f"打开浏览器访问：http://127.0.0.1:{port}")
+    PID_PATH.write_text(str(os.getpid()), encoding="utf-8")
+
+    def stop_server(signum: int, _frame: object) -> None:
+        write_log(f"stopping server by signal {signum}")
+        raise KeyboardInterrupt
+
+    for sig_name in ("SIGINT", "SIGTERM", "SIGBREAK"):
+        sig = getattr(signal, sig_name, None)
+        if sig is not None:
+            signal.signal(sig, stop_server)
+
+    url = f"http://127.0.0.1:{port}"
+    print(f"打开浏览器访问：{url}")
     print("按 Ctrl+C 停止服务。")
-    httpd.serve_forever()
+    try:
+        webbrowser.open(url)
+    except Exception as exc:
+        write_log(f"open browser failed: {exc}")
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        write_log("server stopped")
+    finally:
+        httpd.server_close()
+        try:
+            PID_PATH.unlink()
+        except FileNotFoundError:
+            pass
 
 
 if __name__ == "__main__":

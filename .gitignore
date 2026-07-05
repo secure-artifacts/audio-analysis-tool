@@ -1,4 +1,6 @@
 data/
 logs/
 server.log
+server.pid
+rubric.json
 __pycache__/
