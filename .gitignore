@@ -5,3 +5,6 @@ server.pid
 rubric.json
 __pycache__/
 .tools/
+build/
+dist/
+*.spec

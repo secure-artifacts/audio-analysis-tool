@@ -30,7 +30,14 @@ except ModuleNotFoundError:
     Groq = None
 
 
-ROOT = Path(__file__).resolve().parent
+if getattr(sys, "frozen", False):
+    ROOT = Path(sys.executable).resolve().parent
+    ASSET_DIR = Path(getattr(sys, "_MEIPASS", ROOT))
+else:
+    ROOT = Path(__file__).resolve().parent
+    ASSET_DIR = ROOT
+
+INDEX_PATH = ASSET_DIR / "index.html"
 DATA_DIR = ROOT / "data"
 LOG_PATH = ROOT / "server.log"
 RUBRIC_PATH = ROOT / "rubric.json"
@@ -198,7 +205,7 @@ def remove_data_tree(path: Path) -> None:
 
 def checked_read_path(path: Path) -> Path:
     path_text = os.path.abspath(os.fspath(path))
-    if path_text == os.path.abspath(os.fspath(ROOT / "index.html")):
+    if path_text == os.path.abspath(os.fspath(INDEX_PATH)):
         return Path(path_text)
     return inside_dir(DATA_DIR, Path(path_text))
 
@@ -258,7 +265,13 @@ class KeyPool:
 
 
 def run_ffmpeg(job_id: str, audio_path: Path, chunks_dir: Path) -> list[Path]:
-    ffmpeg = shutil.which("ffmpeg")
+    ffmpeg_candidates = [
+        ROOT / "ffmpeg" / "bin" / "ffmpeg.exe",
+        ROOT / "ffmpeg.exe",
+        ASSET_DIR / "ffmpeg" / "bin" / "ffmpeg.exe",
+        ASSET_DIR / "ffmpeg.exe",
+    ]
+    ffmpeg = next((str(p) for p in ffmpeg_candidates if p.is_file()), None) or shutil.which("ffmpeg")
     if not ffmpeg:
         raise RuntimeError("找不到 ffmpeg。请先安装 ffmpeg，并确认命令行可以运行 ffmpeg。")
 
@@ -896,7 +909,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         if self.path == "/" or self.path == "/index.html":
-            self.send_file(ROOT / "index.html", "text/html; charset=utf-8")
+            self.send_file(INDEX_PATH, "text/html; charset=utf-8")
             return
         if self.path == "/favicon.ico":
             self.send_response(204)
