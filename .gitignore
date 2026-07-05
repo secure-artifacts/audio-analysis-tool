@@ -4,3 +4,4 @@ server.log
 server.pid
 rubric.json
 __pycache__/
+.tools/

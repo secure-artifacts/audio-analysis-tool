@@ -20,22 +20,48 @@ function Ensure-Ffmpeg() {
     return
   }
 
+  $localFfmpeg = Get-ChildItem -Path (Join-Path $PSScriptRoot ".tools\ffmpeg") -Filter ffmpeg.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($localFfmpeg) {
+    $env:Path = $localFfmpeg.DirectoryName + ";" + $env:Path
+    Write-Host "Using downloaded ffmpeg."
+    return
+  }
+
   $winget = Get-Command winget -ErrorAction SilentlyContinue
-  if (-not $winget) {
-    throw "ffmpeg not found, and winget is not available. Install ffmpeg manually, then run again."
+  if ($winget) {
+    Write-Host "ffmpeg missing, installing with winget..."
+    & $winget.Source install --id Gyan.FFmpeg -e --accept-package-agreements --accept-source-agreements
+    $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
+    if (Get-Command ffmpeg -ErrorAction SilentlyContinue) {
+      Write-Host "ffmpeg installed."
+      return
+    }
   }
 
-  Write-Host "ffmpeg missing, installing with winget..."
-  & $winget.Source install --id Gyan.FFmpeg -e --accept-package-agreements --accept-source-agreements
-  if ($LASTEXITCODE -ne 0) { throw "ffmpeg install failed" }
-
-  $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
-  if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
-    throw "ffmpeg installed, but is not on PATH yet. Close this window and run start_windows.bat again."
-  }
+  Write-Host "ffmpeg missing, downloading portable build..."
+  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+  $toolsDir = Join-Path $PSScriptRoot ".tools"
+  $zipPath = Join-Path $toolsDir "ffmpeg.zip"
+  $extractDir = Join-Path $toolsDir "ffmpeg"
+  New-Item -ItemType Directory -Force -Path $toolsDir | Out-Null
+  Invoke-WebRequest "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile $zipPath
+  Expand-Archive -Force -Path $zipPath -DestinationPath $extractDir
+  $localFfmpeg = Get-ChildItem -Path $extractDir -Filter ffmpeg.exe -Recurse | Select-Object -First 1
+  if (-not $localFfmpeg) { throw "ffmpeg download completed, but ffmpeg.exe was not found." }
+  $env:Path = $localFfmpeg.DirectoryName + ";" + $env:Path
 }
 
 function Ensure-Requirements($PythonCommand, [string[]]$PythonArgs = @()) {
+  Write-Host "Using Python: $PythonCommand $($PythonArgs -join ' ')"
+  & $PythonCommand @PythonArgs --version
+
+  & $PythonCommand @PythonArgs -m pip --version *> $null
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "pip missing, enabling pip..."
+    & $PythonCommand @PythonArgs -m ensurepip --upgrade
+    if ($LASTEXITCODE -ne 0) { throw "pip is not available for this Python install." }
+  }
+
   $missing = $false
   foreach ($line in Get-Content "requirements.txt") {
     $requirement = ($line -replace "\s+#.*$", "").Trim()
@@ -50,14 +76,22 @@ function Ensure-Requirements($PythonCommand, [string[]]$PythonArgs = @()) {
 
   if ($missing) {
     Write-Host "Dependencies missing, installing..."
-    & $PythonCommand @PythonArgs -m pip install -r requirements.txt
-    if ($LASTEXITCODE -ne 0) { throw "Dependency install failed" }
+    & $PythonCommand @PythonArgs -m pip install --user -r requirements.txt
+    if ($LASTEXITCODE -ne 0) { throw "Dependency install failed. Check the pip error above: usually internet/proxy, permissions, or a broken Python install." }
   } else {
     Write-Host "Dependencies already installed, skipping install."
   }
 }
 
 Ensure-Ffmpeg
+
+$py = Get-Command py -ErrorAction SilentlyContinue
+if ($py) {
+  "trying py -3: $($py.Source)" | Out-File -FilePath $log -Encoding utf8 -Append
+  Ensure-Requirements $py.Source @("-3")
+  & $py.Source -3 server.py
+  if ($LASTEXITCODE -eq 0) { exit }
+}
 
 $python = Get-Command python -ErrorAction SilentlyContinue
 if ($python) {
@@ -67,11 +101,11 @@ if ($python) {
   if ($LASTEXITCODE -eq 0) { exit }
 }
 
-$py = Get-Command py -ErrorAction SilentlyContinue
-if ($py) {
-  "trying py: $($py.Source)" | Out-File -FilePath $log -Encoding utf8 -Append
-  Ensure-Requirements $py.Source @("-3.11")
-  & $py.Source -3.11 server.py
+$python3 = Get-Command python3 -ErrorAction SilentlyContinue
+if ($python3) {
+  "trying python3: $($python3.Source)" | Out-File -FilePath $log -Encoding utf8 -Append
+  Ensure-Requirements $python3.Source
+  & $python3.Source server.py
   if ($LASTEXITCODE -eq 0) { exit }
 }
 
@@ -83,4 +117,4 @@ if (Test-Path $bundled) {
   exit
 }
 
-Write-Error "Python 3.11/3.12 not found. Install Python, then run this script again."
+Write-Error "Python not found. Install Python from https://www.python.org/downloads/windows/ and tick Add Python to PATH, then run start_windows.bat again."
