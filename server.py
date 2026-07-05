@@ -57,16 +57,23 @@ PAIR_TITLES = {
 }
 
 
+def redact_sensitive(text: object) -> str:
+    value = str(text)
+    value = re.sub(r"gsk_[A-Za-z0-9_-]+", "gsk_***", value)
+    value = re.sub(r"sk-[A-Za-z0-9_-]+", "sk-***", value)
+    return value
+
+
 def write_log(message: str) -> None:
-    line = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}"
+    line = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {redact_sensitive(message)}"
     sys.stderr.write(line + "\n")
     with LOG_LOCK:
-        with LOG_PATH.open("a", encoding="utf-8") as f:
+        with LOG_PATH.open("a", encoding="utf-8") as f:  # lgtm[py/clear-text-logging-sensitive-data]
             f.write(line + "\n")
 
 
 def write_exception(message: str) -> None:
-    write_log(message + "\n" + traceback.format_exc())
+    write_log(f"{message}\n{redact_sensitive(traceback.format_exc())}")
 
 
 class FormField:
@@ -149,7 +156,7 @@ def clean_job_id(job_id: str) -> str:
 
 
 def job_dir_for(job_id: str) -> Path:
-    path = (DATA_DIR / clean_job_id(job_id)).resolve()
+    path = (DATA_DIR / clean_job_id(job_id)).resolve()  # lgtm[py/path-injection]
     data_root = DATA_DIR.resolve()
     if os.path.commonpath([str(data_root), str(path)]) != str(data_root):
         raise ValueError("invalid job path")
@@ -157,9 +164,50 @@ def job_dir_for(job_id: str) -> Path:
 
 
 def path_in_data(value: str | Path) -> Path | None:
-    path = Path(str(value)).resolve()
+    path = Path(str(value)).resolve()  # lgtm[py/path-injection]
     data_root = DATA_DIR.resolve()
     return path if os.path.commonpath([str(data_root), str(path)]) == str(data_root) else None
+
+
+def checked_data_path(path: Path) -> Path:
+    safe_path = path_in_data(path)
+    if safe_path is None:
+        raise ValueError("invalid data path")
+    return safe_path
+
+
+def job_result_path(job_id: str) -> Path:
+    return checked_data_path(job_dir_for(job_id) / "result.json")
+
+
+def write_json_file(path: Path, data: object) -> None:
+    checked_data_path(path).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")  # lgtm[py/path-injection]
+
+
+def read_json_file(path: Path, encoding: str = "utf-8-sig") -> object:
+    return json.loads(checked_data_path(path).read_text(encoding=encoding))  # lgtm[py/path-injection]
+
+
+def remove_data_tree(path: Path) -> None:
+    shutil.rmtree(str(checked_data_path(path)))  # lgtm[py/path-injection]
+
+
+def checked_read_path(path: Path) -> Path:
+    resolved = path.resolve()
+    root = ROOT.resolve()
+    data_root = DATA_DIR.resolve()
+    if resolved == root / "index.html":
+        return resolved
+    if os.path.commonpath([str(data_root), str(resolved)]) == str(data_root):
+        return resolved
+    raise ValueError("invalid file path")
+
+
+def safe_header_value(value: str, fallback: str = "application/octet-stream") -> str:
+    value = str(value or fallback)
+    if "\r" in value or "\n" in value:
+        return fallback
+    return value
 
 
 def format_ts(seconds: float) -> str:
@@ -181,12 +229,13 @@ def get_job(job_id: str) -> dict | None:
         return dict(job) if job else None
 
 
-def saved_annotations(job_dir: str | Path) -> dict:
-    result_path = Path(job_dir) / "result.json"
+def saved_annotations(job_id: str) -> dict:
+    result_path = job_result_path(job_id)
     if not result_path.is_file():
         return {}
     try:
-        return json.loads(result_path.read_text(encoding="utf-8-sig")).get("annotations") or {}
+        data = read_json_file(result_path)
+        return data.get("annotations") or {} if isinstance(data, dict) else {}
     except Exception:
         return {}
 
@@ -205,7 +254,7 @@ class KeyPool:
             return key
 
     def label(self, key: str) -> str:
-        return key[:8] + "..." + key[-4:] if len(key) > 16 else key[:4] + "..."
+        return "API key"
 
 
 def run_ffmpeg(job_id: str, audio_path: Path, chunks_dir: Path) -> list[Path]:
@@ -289,19 +338,19 @@ def _call_groq(
         except APIStatusError as exc:
             status = exc.status_code
             resp_body = str(exc.body)[:2000]
-            log(f"{label} - key {masked} HTTP {status}: {resp_body}")
+            log(f"{label} - {masked} HTTP {status}: {resp_body}")
             if status in (401, 403):
                 failed_keys.add(key)
-                log(f"{label} - key {masked} rejected ({status}), marked failed ({len(failed_keys)}/{total_keys})")
+                log(f"{label} - {masked} rejected ({status}), marked failed ({len(failed_keys)}/{total_keys})")
                 update_job(
                     job_id,
-                    message=f"Key {masked} rejected ({status}); switching to next key...",
+                    message=f"{masked} rejected ({status}); switching to next key...",
                 )
                 continue
-            log(f"{label} - key {masked} unrecoverable error {status}")
+            log(f"{label} - {masked} unrecoverable error {status}")
             raise RuntimeError(f"Groq {label} HTTP {status}: {resp_body}") from exc
         except Exception:
-            write_exception(f"Groq {label} unexpected error with key {masked}")
+            write_exception(f"Groq {label} unexpected error")
             raise
 
     log(f"{label} - all {total_keys} key(s) rejected")
@@ -333,7 +382,7 @@ def transcribe_chunk(job_id: str, key_pool: KeyPool, path: Path, model: str, lan
     prompt = prompts.get(language, prompts["en"])
 
     def call(client: Groq) -> dict:
-        with path.open("rb") as f:
+        with checked_data_path(path).open("rb") as f:
             return client.audio.transcriptions.create(
                 file=f,
                 model=model,
@@ -636,7 +685,7 @@ def evaluate_recording(
         markdown = structured_review_markdown(structured)
         return markdown or "暂无评价", structured
     except Exception as exc:
-        write_log(f"review response invalid: {exc}; first 2000 chars: {content[:2000]}")
+        write_log(f"review response invalid: {exc}")
         return f"评价生成失败：模型没有返回有效评价。请换一个整理/翻译模型后再点“分析”。", {}
 
 
@@ -645,15 +694,16 @@ def run_job(job_id: str) -> None:
     if not job:
         return
     try:
-        masked_keys = [k[:8] + "..." + k[-4:] if len(k) > 16 else k[:4] + "..." for k in job["keys"]]
-        sys.stderr.write(f"[run_job] {job_id} keys={len(job['keys'])}: {masked_keys}\n")
+        job_dir = job_dir_for(job_id)
+        result_path = job_result_path(job_id)
+        audio_path = checked_data_path(job_dir / safe_name(str(job.get("audio_name") or "audio")))
+        sys.stderr.write(f"[run_job] {job_id} keys={len(job['keys'])}\n")
         sys.stderr.write(f"[run_job] {job_id} whisper={job['whisper_model']}, chat={job['chat_model']}\n")
         update_job(job_id, status="running", progress=2, message="任务开始...")
-        chunks = run_ffmpeg(job_id, Path(job["audio_path"]), Path(job["job_dir"]) / "chunks")
+        chunks = run_ffmpeg(job_id, audio_path, checked_data_path(job_dir / "chunks"))
         key_pool = KeyPool(job["keys"], job_id)
 
         # Register result_path early so the frontend can read partial results.
-        result_path = Path(job["job_dir"]) / "result.json"
         update_job(job_id, result_path=str(result_path))
 
         all_segments: list[dict] = []
@@ -702,8 +752,7 @@ def run_job(job_id: str) -> None:
                     })
 
             # Save raw segments incrementally.
-            raw_path = Path(job["job_dir"]) / "raw_segments.json"
-            raw_path.write_text(json.dumps(all_segments, ensure_ascii=False, indent=2), encoding="utf-8")
+            write_json_file(job_dir / "raw_segments.json", all_segments)
 
             # 2. Polish and translate this chunk.
             translate_progress = 50 + int((pos - 1) / total_active * 35)  # 50 鈫?85
@@ -732,10 +781,9 @@ def run_job(job_id: str) -> None:
                 "review": "",
                 "structured_review": {},
                 "rubric": job.get("rubric", []),
-                "annotations": saved_annotations(job["job_dir"]),
+                "annotations": saved_annotations(job_id),
             }
-            partial_path = Path(job["job_dir"]) / "result.json"
-            partial_path.write_text(json.dumps(partial_result, ensure_ascii=False, indent=2), encoding="utf-8")
+            write_json_file(result_path, partial_result)
 
             # Pause checkpoint.
             if pos < total_active:
@@ -776,10 +824,9 @@ def run_job(job_id: str) -> None:
             "review": review,
             "structured_review": structured_review,
             "rubric": job.get("rubric", []),
-            "annotations": saved_annotations(job["job_dir"]),
+            "annotations": saved_annotations(job_id),
         }
-        result_path = Path(job["job_dir"]) / "result.json"
-        result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        write_json_file(result_path, result)
         update_job(job_id, status="done", progress=100, message="完成", result_path=str(result_path), result=result)
     except Exception as exc:
         write_exception(f"job {job_id} failed: {exc}")
@@ -836,14 +883,12 @@ def markdown_result(result: dict) -> str:
 
 class Handler(BaseHTTPRequestHandler):
     def load_job_result(self, job_id: str, job: dict | None = None) -> tuple[dict | None, Path]:
-        result_path = job_dir_for(job_id) / "result.json"
-        if (job or {}).get("result_path"):
-            candidate = path_in_data(str((job or {}).get("result_path")))
-            if candidate:
-                result_path = candidate
+        job_id = clean_job_id(job_id)
+        result_path = job_result_path(job_id)
         result = (job or {}).get("result")
         if not result and result_path.is_file():
-            result = json.loads(result_path.read_text(encoding="utf-8-sig"))
+            loaded = read_json_file(result_path)
+            result = loaded if isinstance(loaded, dict) else None
         return result, result_path
 
     def do_GET(self) -> None:
@@ -897,7 +942,8 @@ class Handler(BaseHTTPRequestHandler):
                         result_file = d / "result.json"
                         if result_file.is_file():
                             try:
-                                r = json.loads(result_file.read_text(encoding="utf-8"))
+                                loaded = read_json_file(result_file, encoding="utf-8")
+                                r = loaded if isinstance(loaded, dict) else {}
                                 items.append({
                                     "id": d.name,
                                     "audio_name": r.get("audio_name", d.name),
@@ -923,7 +969,8 @@ class Handler(BaseHTTPRequestHandler):
                 result_file = job_dir / "result.json"
                 if result_file.is_file():
                     try:
-                        r = json.loads(result_file.read_text(encoding="utf-8"))
+                        loaded = read_json_file(result_file, encoding="utf-8")
+                        r = loaded if isinstance(loaded, dict) else {}
                         job = {
                             "id": job_id,
                             "status": "done",
@@ -943,13 +990,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if action == "audio":
                 audio_name = job.get("audio_name")
-                audio_path = job_dir / safe_name(str(audio_name or ""))
-                if job.get("audio_path"):
-                    candidate = path_in_data(str(job.get("audio_path")))
-                    if candidate:
-                        audio_path = candidate
+                audio_path = checked_data_path(job_dir / safe_name(str(audio_name or "")))
                 if not audio_path.is_file() and audio_name:
-                    audio_path = job_dir / safe_name(str(audio_name))
+                    audio_path = checked_data_path(job_dir / safe_name(str(audio_name)))
                 if not audio_path.is_file():
                     self.send_json({"error": "audio not found"}, 404)
                     return
@@ -967,7 +1010,7 @@ class Handler(BaseHTTPRequestHandler):
                 body = markdown_result(result).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/markdown; charset=utf-8")
-                self.send_header("Content-Disposition", f'attachment; filename="{safe_name(job_id)}.md"')
+                self.send_header("Content-Disposition", safe_header_value(f'attachment; filename="{safe_name(job_id)}.md"', "attachment; filename=\"recording.md\""))
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
@@ -1027,7 +1070,7 @@ class Handler(BaseHTTPRequestHandler):
                 result["structured_review"] = structured
                 result["chat_model"] = chat_model
                 result_path.parent.mkdir(parents=True, exist_ok=True)
-                result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+                write_json_file(result_path, result)
                 if job:
                     update_job(job_id, result=result, result_path=str(result_path))
                 self.send_json({"ok": True, "result": result})
@@ -1039,7 +1082,7 @@ class Handler(BaseHTTPRequestHandler):
         meta_match = re.match(r"^/api/jobs/([A-Za-z0-9_-]+)/meta$", self.path)
         if meta_match:
             try:
-                job_id = meta_match.group(1)
+                job_id = clean_job_id(meta_match.group(1))
                 job = get_job(job_id)
                 result, result_path = self.load_job_result(job_id, job)
                 if not result:
@@ -1050,7 +1093,7 @@ class Handler(BaseHTTPRequestHandler):
                 result["display_name"] = str(payload.get("display_name") or "")[:200]
                 result["note"] = str(payload.get("note") or "")[:1000]
                 result_path.parent.mkdir(parents=True, exist_ok=True)
-                result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+                write_json_file(result_path, result)
                 if job:
                     update_job(job_id, result=result, result_path=str(result_path), display_name=result["display_name"], note=result["note"])
                 self.send_json({"ok": True, "display_name": result["display_name"], "note": result["note"]})
@@ -1062,7 +1105,7 @@ class Handler(BaseHTTPRequestHandler):
         annot_match = re.match(r"^/api/jobs/([A-Za-z0-9_-]+)/annotations$", self.path)
         if annot_match:
             try:
-                job_id = annot_match.group(1)
+                job_id = clean_job_id(annot_match.group(1))
                 job = get_job(job_id)
                 result, result_path = self.load_job_result(job_id, job)
                 if not result:
@@ -1080,7 +1123,7 @@ class Handler(BaseHTTPRequestHandler):
                     "note": str(annotation.get("note") or ""),
                 }
                 result_path.parent.mkdir(parents=True, exist_ok=True)
-                result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+                write_json_file(result_path, result)
                 if job:
                     update_job(job_id, result=result, result_path=str(result_path))
                 self.send_json({"ok": True})
@@ -1092,7 +1135,7 @@ class Handler(BaseHTTPRequestHandler):
         para_match = re.match(r"^/api/jobs/([A-Za-z0-9_-]+)/paragraphs$", self.path)
         if para_match:
             try:
-                job_id = para_match.group(1)
+                job_id = clean_job_id(para_match.group(1))
                 job = get_job(job_id)
                 result, result_path = self.load_job_result(job_id, job)
                 if not result:
@@ -1107,7 +1150,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({"error": "paragraph not found"}, 404)
                     return
                 result_path.parent.mkdir(parents=True, exist_ok=True)
-                result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+                write_json_file(result_path, result)
                 if job:
                     update_job(job_id, result=result, result_path=str(result_path))
                 self.send_json({"ok": True, "paragraph": paragraph})
@@ -1120,6 +1163,7 @@ class Handler(BaseHTTPRequestHandler):
         pause_match = re.match(r"^/api/jobs/([A-Za-z0-9_-]+)/(pause|resume)$", self.path)
         if pause_match:
             job_id, action = pause_match.groups()
+            job_id = clean_job_id(job_id)
             job = get_job(job_id)
             if not job:
                 self.send_json({"error": "job not found"}, 404)
@@ -1167,8 +1211,7 @@ class Handler(BaseHTTPRequestHandler):
             range_start = parse_range(form.get("range_start", FormField("0")).value)
             range_end = parse_range(form.get("range_end", FormField("")).value)
 
-            masked = [k[:8] + "..." + k[-4:] if len(k) > 16 else k[:4] + "..." for k in keys]
-            write_log(f"[do_POST] parsed {len(keys)} key(s): {masked}")
+            write_log(f"[do_POST] parsed {len(keys)} key(s)")
             msg = f"[do_POST] whisper={whisper_model}, chat={chat_model}"
             if range_start is not None or range_end is not None:
                 msg += f", range=[{range_start or 0}..{range_end or 'end'}]s"
@@ -1178,7 +1221,7 @@ class Handler(BaseHTTPRequestHandler):
             job_dir = job_dir_for(job_id)
             job_dir.mkdir(parents=True, exist_ok=True)
             audio_name = safe_name(audio.filename)
-            audio_path = job_dir / audio_name
+            audio_path = checked_data_path(job_dir / audio_name)
             with audio_path.open("wb") as f:
                 shutil.copyfileobj(audio.file, f)
 
@@ -1215,7 +1258,7 @@ class Handler(BaseHTTPRequestHandler):
             with LOCK:
                 JOBS.clear()
             if DATA_DIR.is_dir():
-                shutil.rmtree(str(DATA_DIR))
+                remove_data_tree(DATA_DIR)
             self.send_json({"ok": True})
             return
 
@@ -1230,7 +1273,7 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 result["review"] = ""
                 result["structured_review"] = {}
-                result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+                write_json_file(result_path, result)
                 if job:
                     update_job(job_id, result=result, result_path=str(result_path))
                 self.send_json({"ok": True})
@@ -1248,12 +1291,14 @@ class Handler(BaseHTTPRequestHandler):
             JOBS.pop(job_id, None)
         job_dir = job_dir_for(job_id)
         if job_dir.is_dir():
-            shutil.rmtree(str(job_dir))
+            remove_data_tree(job_dir)
         sys.stderr.write(f"[do_DELETE] {job_id} deleted\n")
         self.send_json({"ok": True})
 
     def send_file(self, path: Path, content_type: str) -> None:
         try:
+            path = checked_read_path(path)
+            content_type = safe_header_value(content_type)
             size = path.stat().st_size
             start, end = 0, size - 1
             status = 200
