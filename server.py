@@ -155,18 +155,25 @@ def clean_job_id(job_id: str) -> str:
     return job_id
 
 
-def job_dir_for(job_id: str) -> Path:
-    path = (DATA_DIR / clean_job_id(job_id)).resolve()  # lgtm[py/path-injection]
-    data_root = DATA_DIR.resolve()
-    if os.path.commonpath([str(data_root), str(path)]) != str(data_root):
-        raise ValueError("invalid job path")
+def inside_dir(base: Path, path: Path) -> Path:
+    base = base.resolve()
+    path = path.resolve()
+    try:
+        path.relative_to(base)
+    except ValueError as exc:
+        raise ValueError("path escapes allowed directory") from exc
     return path
 
 
+def job_dir_for(job_id: str) -> Path:
+    return inside_dir(DATA_DIR, DATA_DIR / clean_job_id(job_id))
+
+
 def path_in_data(value: str | Path) -> Path | None:
-    path = Path(str(value)).resolve()  # lgtm[py/path-injection]
-    data_root = DATA_DIR.resolve()
-    return path if os.path.commonpath([str(data_root), str(path)]) == str(data_root) else None
+    try:
+        return inside_dir(DATA_DIR, Path(str(value)))
+    except ValueError:
+        return None
 
 
 def checked_data_path(path: Path) -> Path:
@@ -195,12 +202,9 @@ def remove_data_tree(path: Path) -> None:
 def checked_read_path(path: Path) -> Path:
     resolved = path.resolve()
     root = ROOT.resolve()
-    data_root = DATA_DIR.resolve()
     if resolved == root / "index.html":
         return resolved
-    if os.path.commonpath([str(data_root), str(resolved)]) == str(data_root):
-        return resolved
-    raise ValueError("invalid file path")
+    return inside_dir(DATA_DIR, resolved)
 
 
 def safe_header_value(value: str, fallback: str = "application/octet-stream") -> str:
@@ -882,6 +886,9 @@ def markdown_result(result: dict) -> str:
 
 
 class Handler(BaseHTTPRequestHandler):
+    def send_header(self, keyword: str, value: object) -> None:
+        super().send_header(keyword, safe_header_value(str(value), ""))
+
     def load_job_result(self, job_id: str, job: dict | None = None) -> tuple[dict | None, Path]:
         job_id = clean_job_id(job_id)
         result_path = job_result_path(job_id)
@@ -1358,6 +1365,13 @@ def self_test() -> None:
         raise AssertionError("bad job id accepted")
     except ValueError:
         pass
+    assert job_dir_for("abc_123-X").name == "abc_123-X"
+    try:
+        inside_dir(DATA_DIR, DATA_DIR / ".." / "server.py")
+        raise AssertionError("escaped path accepted")
+    except ValueError:
+        pass
+    assert safe_header_value("x\r\nInjected: y", "fallback") == "fallback"
     assert parse_rubric_json('["表达清晰"]')[0]["title"] == "表达清晰"
     assert parse_rubric_json('[{"title":"表达清晰","detail":"是否清楚"}]')[0]["detail"] == "是否清楚"
     assert parse_rubric_json('["None"]') == []
