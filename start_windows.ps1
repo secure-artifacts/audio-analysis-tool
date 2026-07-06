@@ -78,7 +78,7 @@ function Ensure-Requirements($PythonCommand, [string[]]$PythonArgs = @()) {
     $requirement = ($line -replace "\s+#.*$", "").Trim()
     if (-not $requirement) { continue }
     $package = ($requirement -split "[<>=!~; ]")[0]
-    & $PythonCommand @PythonArgs -m pip show $package *> $null
+    & $PythonCommand @PythonArgs -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('$package') else 1)"
     if ($LASTEXITCODE -ne 0) {
       $missing = $true
       break
