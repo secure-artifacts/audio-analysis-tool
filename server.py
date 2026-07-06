@@ -843,6 +843,19 @@ def run_job(job_id: str) -> None:
         update_job(job_id, status="done", progress=100, message="完成", result_path=str(result_path), result=result)
     except Exception as exc:
         write_exception(f"job {job_id} failed: {exc}")
+        try:
+            result_path = job_result_path(job_id)
+            if result_path.is_file():
+                result = json.loads(result_path.read_text(encoding="utf-8"))
+                if result.get("paragraphs"):
+                    if job.get("make_review") and not result.get("review"):
+                        result["review"] = f"评价生成失败：{exc}\n\n转录和翻译已完成。可以稍后在“历史 / 评价”里点“分析”重新生成评价。"
+                        result["structured_review"] = {}
+                        write_json_file(result_path, result)
+                    update_job(job_id, status="done", progress=100, message="转录完成，评价生成失败", result_path=str(result_path), result=result)
+                    return
+        except Exception:
+            write_exception(f"failed to preserve partial result for {job_id}")
         update_job(job_id, status="error", message=str(exc), error=str(exc), progress=100)
 
 
