@@ -12,6 +12,33 @@ ensure_homebrew_path() {
   fi
 }
 
+persist_homebrew_path() {
+  if [ -x /opt/homebrew/bin/brew ]; then
+    line='eval "$(/opt/homebrew/bin/brew shellenv)"'
+  elif [ -x /usr/local/bin/brew ]; then
+    line='eval "$(/usr/local/bin/brew shellenv)"'
+  else
+    return
+  fi
+
+  profile="${ZDOTDIR:-$HOME}/.zprofile"
+  touch "$profile" || return
+  grep -F "$line" "$profile" >/dev/null 2>&1 || printf "\n%s\n" "$line" >> "$profile"
+}
+
+install_homebrew() {
+  if [ "$(uname -s)" != "Darwin" ]; then
+    return 1
+  fi
+  command -v curl >/dev/null 2>&1 || return 1
+
+  echo "Homebrew missing, installing Homebrew..."
+  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || exit 1
+  ensure_homebrew_path
+  persist_homebrew_path
+  command -v brew >/dev/null 2>&1
+}
+
 ensure_ffmpeg() {
   if command -v ffmpeg >/dev/null 2>&1; then
     echo "ffmpeg already installed."
@@ -19,15 +46,18 @@ ensure_ffmpeg() {
   fi
 
   ensure_homebrew_path
+  if ! command -v brew >/dev/null 2>&1; then
+    install_homebrew || {
+      echo "ffmpeg not found, and Homebrew could not be installed automatically." >&2
+      exit 1
+    }
+  fi
+
   if command -v brew >/dev/null 2>&1; then
     echo "ffmpeg missing, installing with Homebrew..."
     brew install ffmpeg || exit 1
     return
   fi
-
-  echo "ffmpeg not found. On macOS, install Homebrew first, then run this script again:" >&2
-  echo '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"' >&2
-  exit 1
 }
 
 ensure_requirements() {
